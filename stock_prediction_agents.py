@@ -105,6 +105,8 @@ class ClassifierAgent:
                 self.vocabulary.add(token)
                 self.token_counts[label][token] += 1
                 self.total_tokens[label] += 1
+        if not self.vocabulary:
+            raise ValueError("Training data produced an empty vocabulary; check input text content.")
         self.fitted = True
 
     def _class_log_prior(self, label: int) -> float:
