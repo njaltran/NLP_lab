@@ -83,6 +83,18 @@ class StockPredictionAgentTests(unittest.TestCase):
         self.assertEqual(ClassifierAgent._direction_from_impact(-0.5), "bearish")
         self.assertEqual(ClassifierAgent._direction_from_impact(0.0), "neutral")
 
+    def test_token_impact_scores_are_aggregated_per_token(self):
+        classifier = ClassifierAgent()
+        classifier.fit(
+            tokenized_texts=[["gain", "profit"], ["loss", "drop"]],
+            labels=[1, 0],
+        )
+        impacts = classifier._token_impact_scores(["gain", "gain", "loss"])
+        self.assertIn("gain", impacts)
+        self.assertIn("loss", impacts)
+        self.assertGreater(impacts["gain"], 0.0)
+        self.assertLess(impacts["loss"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
