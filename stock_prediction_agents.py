@@ -7,7 +7,7 @@ import random
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
 
 TOKEN_PATTERN = re.compile(r"[a-zA-Z][a-zA-Z0-9']+")
@@ -181,9 +181,27 @@ class EvaluatorAgent:
 
 
 class ManagerAgent:
-    def __init__(self, random_seed: int = 7, search_space: Sequence[Dict[str, float]] | None = None):
+    def __init__(
+        self,
+        random_seed: int = 7,
+        search_space: Sequence[Dict[str, Any]] | None = None,
+    ):
         self.random_seed = random_seed
-        self.search_space = list(search_space) if search_space is not None else list(DEFAULT_SEARCH_SPACE)
+        raw_space = list(search_space) if search_space is not None else list(DEFAULT_SEARCH_SPACE)
+        self.search_space = []
+        for candidate in raw_space:
+            if not {"include_bigrams", "min_token_length", "smoothing"} <= set(candidate):
+                raise ValueError(
+                    "Each search-space candidate must define include_bigrams, "
+                    "min_token_length, and smoothing."
+                )
+            self.search_space.append(
+                {
+                    "include_bigrams": bool(candidate["include_bigrams"]),
+                    "min_token_length": int(candidate["min_token_length"]),
+                    "smoothing": float(candidate["smoothing"]),
+                }
+            )
         self.evaluator = EvaluatorAgent()
         self.best_processing_agent: ProcessingAgent | None = None
         self.best_classifier_agent: ClassifierAgent | None = None

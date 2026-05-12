@@ -14,8 +14,8 @@ This repository now includes a minimal multi-agent framework in
 
 ```bash
 python stock_prediction_agents.py \
-  --dataset /absolute/path/to/financial_news.csv \
-  --manual-eval-output /absolute/path/manual_explanation_eval.csv \
+  --dataset data/financial_news.csv \
+  --manual-eval-output outputs/manual_explanation_eval.csv \
   --example-text "Company beats earnings expectations"
 ```
 
