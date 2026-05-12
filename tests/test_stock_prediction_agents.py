@@ -2,9 +2,16 @@ import csv
 
 import pytest
 
-from stock_prediction_agents import ClassifierAgent, ManagerAgent, NewsSample, ProcessingAgent, load_financial_news_csv
+from stock_prediction_agents import (
+    ClassifierAgent,
+    ManagerAgent,
+    NewsSample,
+    ProcessingAgent,
+    load_financial_news_csv,
+)
 
 
+@pytest.fixture
 def samples():
     return [
         NewsSample("Company reports strong earnings growth and profit beat", 1),
@@ -25,9 +32,9 @@ def samples():
 
 
 @pytest.mark.parametrize("seed", [7, 11])
-def test_end_to_end_training_and_explanation(seed):
+def test_end_to_end_training_and_explanation(seed, samples):
     manager = ManagerAgent(random_seed=seed)
-    metrics = manager.run_iterative_training(samples())
+    metrics = manager.run_iterative_training(samples)
     assert metrics["validation_accuracy"] >= 0.0
     assert metrics["test_accuracy"] >= 0.0
 
@@ -35,16 +42,16 @@ def test_end_to_end_training_and_explanation(seed):
     assert output["prediction"] in {"UP", "DOWN"}
     assert "Top evidence tokens:" in output["explanation"]
 
-    manual_rows = manager.generate_manual_evaluation_rows(samples(), limit=5)
+    manual_rows = manager.generate_manual_evaluation_rows(samples, limit=5)
     assert len(manual_rows) == 5
     assert "manual_score_1_to_5" in manual_rows[0]
 
 
-def test_deterministic_for_same_seed():
+def test_deterministic_for_same_seed(samples):
     manager_a = ManagerAgent(random_seed=7)
     manager_b = ManagerAgent(random_seed=7)
-    metrics_a = manager_a.run_iterative_training(samples())
-    metrics_b = manager_b.run_iterative_training(samples())
+    metrics_a = manager_a.run_iterative_training(samples)
+    metrics_b = manager_b.run_iterative_training(samples)
     assert metrics_a == metrics_b
 
 

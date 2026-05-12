@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from typing import Dict, Iterable
 
 from helpers import (
     ClassifierAgent,
@@ -15,7 +16,7 @@ from helpers import (
 )
 
 
-def _write_manual_eval_csv(rows, output_path: str) -> None:
+def _write_manual_eval_csv(rows: Iterable[Dict[str, str]], output_path: str) -> None:
     """Backward-compatible wrapper for manual-evaluation CSV writing."""
     write_manual_eval_csv(rows, output_path)
 
