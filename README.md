@@ -3,7 +3,7 @@
 ## Agent-based stock prediction from financial news
 
 This repository now includes a minimal multi-agent framework in
-`/home/runner/work/NLP_lab/NLP_lab/stock_prediction_agents.py` with:
+`stock_prediction_agents.py` with:
 
 - `ManagerAgent` for iterative model selection and orchestration
 - `ProcessingAgent` for text preprocessing
@@ -13,7 +13,7 @@ This repository now includes a minimal multi-agent framework in
 ### Run
 
 ```bash
-python /home/runner/work/NLP_lab/NLP_lab/stock_prediction_agents.py \
+python stock_prediction_agents.py \
   --dataset /absolute/path/to/financial_news.csv \
   --manual-eval-output /absolute/path/manual_explanation_eval.csv \
   --example-text "Company beats earnings expectations"
@@ -24,6 +24,5 @@ Output includes validation/test accuracy and a CSV file that can be manually sco
 ### Tests
 
 ```bash
-cd /home/runner/work/NLP_lab/NLP_lab
-python -m unittest discover -v
+python -m unittest discover -s tests -p 'test*.py' -v
 ```

@@ -234,7 +234,7 @@ class ManagerAgent:
                 min_token_length=candidate["min_token_length"],
                 smoothing=candidate["smoothing"],
             )
-            if val_acc >= self.best_validation_accuracy:
+            if val_acc > self.best_validation_accuracy:
                 self.best_validation_accuracy = val_acc
                 self.best_processing_agent = processing
                 self.best_classifier_agent = classifier
