@@ -27,18 +27,22 @@ class StockPredictionAgentTests(unittest.TestCase):
             NewsSample("Demand slowdown triggers concerns and decline", 0),
             NewsSample("Debt issues and weak forecast pressure shares", 0),
         ]
-        manager = ManagerAgent(random_seed=11)
-        metrics = manager.run_iterative_training(samples)
-        self.assertGreaterEqual(metrics["validation_accuracy"], 0.0)
-        self.assertGreaterEqual(metrics["test_accuracy"], 0.0)
+        for seed in (7, 11):
+            with self.subTest(seed=seed):
+                manager = ManagerAgent(random_seed=seed)
+                metrics = manager.run_iterative_training(samples)
+                self.assertGreaterEqual(metrics["validation_accuracy"], 0.0)
+                self.assertGreaterEqual(metrics["test_accuracy"], 0.0)
 
-        output = manager.predict_with_justification("Analysts upgrade stock after strong demand")
-        self.assertIn(output["prediction"], {"UP", "DOWN"})
-        self.assertIn("Top evidence tokens:", output["explanation"])
+                output = manager.predict_with_justification(
+                    "Analysts upgrade stock after strong demand"
+                )
+                self.assertIn(output["prediction"], {"UP", "DOWN"})
+                self.assertIn("Top evidence tokens:", output["explanation"])
 
-        manual_rows = manager.generate_manual_evaluation_rows(samples, limit=5)
-        self.assertEqual(len(manual_rows), 5)
-        self.assertIn("manual_score_1_to_5", manual_rows[0])
+                manual_rows = manager.generate_manual_evaluation_rows(samples, limit=5)
+                self.assertEqual(len(manual_rows), 5)
+                self.assertIn("manual_score_1_to_5", manual_rows[0])
 
     def test_csv_loader_detects_supported_columns(self):
         with tempfile.NamedTemporaryFile("w+", newline="", suffix=".csv") as handle:

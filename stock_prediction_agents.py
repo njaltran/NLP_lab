@@ -139,7 +139,7 @@ class ClassifierAgent:
             return "No strong token-level evidence was found."
         fragments = []
         for token, impact in ranked:
-            direction = "upward" if impact >= 0 else "downward"
+            direction = "bullish" if impact >= 0 else "bearish"
             fragments.append(f"{token}({direction},{impact:.2f})")
         return "Top evidence tokens: " + ", ".join(fragments)
 
@@ -277,13 +277,13 @@ class ManagerAgent:
 
 
 def _write_manual_eval_csv(rows: Iterable[Dict[str, str]], output_path: str) -> None:
-    rows = list(rows)
-    if not rows:
+    rows_list = list(rows)
+    if not rows_list:
         return
     with open(output_path, "w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
+        writer = csv.DictWriter(handle, fieldnames=list(rows_list[0].keys()))
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(rows_list)
 
 
 def main() -> None:
