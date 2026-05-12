@@ -11,6 +11,13 @@ from typing import Dict, Iterable, List, Sequence, Tuple
 
 
 TOKEN_PATTERN = re.compile(r"[a-zA-Z][a-zA-Z0-9']+")
+MIN_SAMPLES_REQUIRED = 10
+DEFAULT_SEARCH_SPACE = [
+    {"include_bigrams": False, "min_token_length": 2, "smoothing": 1.0},
+    {"include_bigrams": True, "min_token_length": 2, "smoothing": 1.0},
+    {"include_bigrams": False, "min_token_length": 3, "smoothing": 0.7},
+    {"include_bigrams": True, "min_token_length": 3, "smoothing": 0.7},
+]
 
 
 @dataclass(frozen=True)
@@ -174,8 +181,9 @@ class EvaluatorAgent:
 
 
 class ManagerAgent:
-    def __init__(self, random_seed: int = 7):
+    def __init__(self, random_seed: int = 7, search_space: Sequence[Dict[str, float]] | None = None):
         self.random_seed = random_seed
+        self.search_space = list(search_space) if search_space is not None else list(DEFAULT_SEARCH_SPACE)
         self.evaluator = EvaluatorAgent()
         self.best_processing_agent: ProcessingAgent | None = None
         self.best_classifier_agent: ClassifierAgent | None = None
@@ -216,17 +224,13 @@ class ManagerAgent:
         return val_acc, processing, classifier
 
     def run_iterative_training(self, samples: Sequence[NewsSample]) -> Dict[str, float]:
-        if len(samples) < 10:
-            raise ValueError("Provide at least 10 labeled samples for training and evaluation.")
+        if len(samples) < MIN_SAMPLES_REQUIRED:
+            raise ValueError(
+                f"Provide at least {MIN_SAMPLES_REQUIRED} labeled samples for training and evaluation."
+            )
         train_samples, val_samples, test_samples = self._split_data(samples)
-        search_space = [
-            {"include_bigrams": False, "min_token_length": 2, "smoothing": 1.0},
-            {"include_bigrams": True, "min_token_length": 2, "smoothing": 1.0},
-            {"include_bigrams": False, "min_token_length": 3, "smoothing": 0.7},
-            {"include_bigrams": True, "min_token_length": 3, "smoothing": 0.7},
-        ]
 
-        for candidate in search_space:
+        for candidate in self.search_space:
             val_acc, processing, classifier = self._train_once(
                 train_samples=train_samples,
                 val_samples=val_samples,
@@ -239,8 +243,8 @@ class ManagerAgent:
                 self.best_processing_agent = processing
                 self.best_classifier_agent = classifier
 
-        assert self.best_processing_agent is not None
-        assert self.best_classifier_agent is not None
+        if self.best_processing_agent is None or self.best_classifier_agent is None:
+            raise ValueError("No valid model configuration was found during iterative training.")
         test_tokens = [self.best_processing_agent.tokenize(sample.text) for sample in test_samples]
         test_labels = [sample.label for sample in test_samples]
         test_pred = self.best_classifier_agent.predict(test_tokens)
