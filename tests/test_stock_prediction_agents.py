@@ -1,5 +1,4 @@
 import csv
-
 import pytest
 
 from stock_prediction_agents import (
