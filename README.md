@@ -10,6 +10,10 @@ This repository now includes a minimal multi-agent framework in
 - `ClassifierAgent` for news-to-market-direction classification
 - `EvaluatorAgent` for test accuracy and manual explanation review set generation
 
+The implementation is organized into granular helper modules under `helpers/`,
+grouped by concern (data loading, preprocessing, classifier, evaluation,
+manager orchestration, and IO utilities).
+
 ### Run
 
 ```bash
@@ -24,5 +28,5 @@ Output includes validation/test accuracy and a CSV file that can be manually sco
 ### Tests
 
 ```bash
-python -m unittest discover -s tests -p 'test*.py' -v
+python -m pytest -q
 ```
