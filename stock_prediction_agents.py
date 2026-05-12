@@ -71,6 +71,8 @@ def load_financial_news_csv(path: str) -> List[NewsSample]:
 
 class ProcessingAgent:
     def __init__(self, include_bigrams: bool = False, min_token_length: int = 2):
+        if min_token_length < 1:
+            raise ValueError("min_token_length must be at least 1.")
         self.include_bigrams = include_bigrams
         self.min_token_length = min_token_length
 
@@ -87,6 +89,8 @@ class ProcessingAgent:
 
 class ClassifierAgent:
     def __init__(self, smoothing: float = 1.0):
+        if smoothing < 0:
+            raise ValueError("smoothing must be non-negative.")
         self.smoothing = smoothing
         self.class_counts = Counter()
         self.token_counts = {0: Counter(), 1: Counter()}
@@ -218,6 +222,8 @@ class ManagerAgent:
     def _split_data(
         self, samples: Sequence[NewsSample], train_ratio: float = 0.7, val_ratio: float = 0.15
     ) -> Tuple[List[NewsSample], List[NewsSample], List[NewsSample]]:
+        if train_ratio <= 0 or val_ratio < 0 or train_ratio + val_ratio >= 1:
+            raise ValueError("train_ratio and val_ratio must satisfy: train_ratio>0, val_ratio>=0, sum<1.")
         shuffled = list(samples)
         random.Random(self.random_seed).shuffle(shuffled)
         n_total = len(shuffled)
