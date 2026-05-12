@@ -28,5 +28,6 @@ Output includes validation/test accuracy and a CSV file that can be manually sco
 ### Tests
 
 ```bash
+python -m pip install -e ".[test]"
 python -m pytest -q
 ```
