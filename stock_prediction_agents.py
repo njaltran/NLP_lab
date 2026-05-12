@@ -147,7 +147,12 @@ class ClassifierAgent:
             return "No strong token-level evidence was found."
         fragments = []
         for token, impact in ranked:
-            direction = "bullish" if impact > 0 else "bearish" if impact < 0 else "neutral"
+            if impact > 0:
+                direction = "bullish"
+            elif impact < 0:
+                direction = "bearish"
+            else:
+                direction = "neutral"
             fragments.append(f"{token}({direction},{impact:.2f})")
         return "Top evidence tokens: " + ", ".join(fragments)
 
@@ -206,7 +211,7 @@ class ManagerAgent:
         self.evaluator = EvaluatorAgent()
         self.best_processing_agent: ProcessingAgent | None = None
         self.best_classifier_agent: ClassifierAgent | None = None
-        self.best_validation_accuracy = 0.0
+        self.best_validation_accuracy = -1.0
 
     def _split_data(
         self, samples: Sequence[NewsSample], train_ratio: float = 0.7, val_ratio: float = 0.15
