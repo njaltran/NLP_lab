@@ -1,3 +1,12 @@
+"""Agent-based stock price direction prediction from financial news text.
+
+This module provides a lightweight multi-agent architecture:
+- ManagerAgent: orchestrates iterative training and evaluation.
+- ProcessingAgent: tokenization and feature extraction.
+- ClassifierAgent: Naive Bayes text classifier with explanations.
+- EvaluatorAgent: metric computation and manual-evaluation export support.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -23,11 +32,15 @@ DEFAULT_SEARCH_SPACE = [
 
 @dataclass(frozen=True)
 class NewsSample:
+    """Single labeled news datapoint used for training and evaluation."""
+
     text: str
     label: int
 
 
 def _normalize_label(raw_label: str) -> int:
+    """Map raw label values from common formats into binary direction labels."""
+
     value = raw_label.strip().lower()
     positive = {"1", "up", "positive", "bullish", "rise", "gain"}
     negative = {"0", "-1", "down", "negative", "bearish", "fall", "loss"}
@@ -43,6 +56,8 @@ def _normalize_label(raw_label: str) -> int:
 
 
 def load_financial_news_csv(path: str) -> List[NewsSample]:
+    """Load financial news samples from CSV with flexible text/label column names."""
+
     with open(path, newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         rows = list(reader)
@@ -70,13 +85,17 @@ def load_financial_news_csv(path: str) -> List[NewsSample]:
 
 
 class ProcessingAgent:
+    """Preprocess financial-news text into token features for modeling."""
+
     def __init__(self, include_bigrams: bool = False, min_token_length: int = 2):
+        """Initialize preprocessing options."""
         if min_token_length < 1:
             raise ValueError("min_token_length must be at least 1.")
         self.include_bigrams = include_bigrams
         self.min_token_length = min_token_length
 
     def tokenize(self, text: str) -> List[str]:
+        """Tokenize text and optionally append adjacent bigram tokens."""
         tokens = [
             tok.lower()
             for tok in TOKEN_PATTERN.findall(text)
@@ -88,7 +107,10 @@ class ProcessingAgent:
 
 
 class ClassifierAgent:
+    """Multinomial Naive Bayes classifier with token-level explanations."""
+
     def __init__(self, smoothing: float = 1.0):
+        """Initialize classifier hyperparameters and model state."""
         if smoothing < 0:
             raise ValueError("smoothing must be non-negative.")
         self.smoothing = smoothing
@@ -99,6 +121,7 @@ class ClassifierAgent:
         self.fitted = False
 
     def fit(self, tokenized_texts: Sequence[Sequence[str]], labels: Sequence[int]) -> None:
+        """Fit model statistics from tokenized texts and binary labels."""
         self.class_counts.clear()
         self.token_counts = {0: Counter(), 1: Counter()}
         self.total_tokens = {0: 0, 1: 0}
@@ -114,18 +137,21 @@ class ClassifierAgent:
         self.fitted = True
 
     def _class_log_prior(self, label: int) -> float:
+        """Return log prior probability for a class label."""
         total = sum(self.class_counts.values())
         if total == 0:
             raise ValueError("Model has not been fitted.")
         return math.log(self.class_counts[label] / total)
 
     def _token_log_prob(self, token: str, label: int) -> float:
+        """Return smoothed log likelihood of token under a class."""
         vocab_size = max(len(self.vocabulary), 1)
         numerator = self.token_counts[label][token] + self.smoothing
         denominator = self.total_tokens[label] + self.smoothing * vocab_size
         return math.log(numerator / denominator)
 
     def predict_one(self, tokens: Sequence[str]) -> int:
+        """Predict binary direction label for one tokenized sample."""
         if not self.fitted:
             raise ValueError("Model has not been fitted.")
         scores = {}
@@ -136,35 +162,47 @@ class ClassifierAgent:
         return 1 if scores[1] >= scores[0] else 0
 
     def predict(self, tokenized_texts: Sequence[Sequence[str]]) -> List[int]:
+        """Predict binary direction labels for multiple tokenized samples."""
         return [self.predict_one(tokens) for tokens in tokenized_texts]
 
-    def explain_prediction(self, tokens: Sequence[str], top_k: int = 5) -> str:
-        if not self.fitted:
-            raise ValueError("Model has not been fitted.")
+    @staticmethod
+    def _direction_from_impact(impact: float) -> str:
+        """Convert token impact sign into a readable market-direction hint."""
+        if impact > 0:
+            return "bullish"
+        if impact < 0:
+            return "bearish"
+        return "neutral"
+
+    def _token_impact_scores(self, tokens: Sequence[str]) -> Dict[str, float]:
+        """Aggregate each token's contribution toward bullish vs bearish score."""
         token_impacts = defaultdict(float)
         for token in tokens:
             token_impacts[token] += self._token_log_prob(token, 1) - self._token_log_prob(
                 token, 0
             )
-        ranked = sorted(token_impacts.items(), key=lambda item: abs(item[1]), reverse=True)[
-            :top_k
-        ]
+        return dict(token_impacts)
+
+    def explain_prediction(self, tokens: Sequence[str], top_k: int = 5) -> str:
+        """Return top token-level evidence used to justify a prediction."""
+        if not self.fitted:
+            raise ValueError("Model has not been fitted.")
+        token_impacts = self._token_impact_scores(tokens)
+        ranked = sorted(token_impacts.items(), key=lambda item: abs(item[1]), reverse=True)[:top_k]
         if not ranked:
             return "No strong token-level evidence was found."
         fragments = []
         for token, impact in ranked:
-            if impact > 0:
-                direction = "bullish"
-            elif impact < 0:
-                direction = "bearish"
-            else:
-                direction = "neutral"
+            direction = self._direction_from_impact(impact)
             fragments.append(f"{token}({direction},{impact:.2f})")
         return "Top evidence tokens: " + ", ".join(fragments)
 
 
 class EvaluatorAgent:
+    """Evaluate classification quality and build manual-review artifacts."""
+
     def accuracy(self, y_true: Sequence[int], y_pred: Sequence[int]) -> float:
+        """Compute classification accuracy for paired gold/prediction labels."""
         if not y_true:
             return 0.0
         return sum(int(a == b) for a, b in zip(y_true, y_pred)) / len(y_true)
@@ -176,6 +214,7 @@ class EvaluatorAgent:
         explanations: Sequence[str],
         limit: int = 20,
     ) -> List[Dict[str, str]]:
+        """Build a compact row set for manual explanation quality scoring."""
         rows = []
         for sample, pred, explanation in zip(samples, predictions, explanations):
             rows.append(
@@ -193,11 +232,14 @@ class EvaluatorAgent:
 
 
 class ManagerAgent:
+    """Orchestrate training, validation-based model selection, and inference."""
+
     def __init__(
         self,
         random_seed: int = 7,
         search_space: Sequence[Dict[str, Any]] | None = None,
     ):
+        """Create manager with reproducible random seed and optional search space."""
         self.random_seed = random_seed
         raw_space = list(search_space) if search_space is not None else list(DEFAULT_SEARCH_SPACE)
         self.search_space = []
@@ -222,6 +264,7 @@ class ManagerAgent:
     def _split_data(
         self, samples: Sequence[NewsSample], train_ratio: float = 0.7, val_ratio: float = 0.15
     ) -> Tuple[List[NewsSample], List[NewsSample], List[NewsSample]]:
+        """Split samples into train/validation/test partitions."""
         if train_ratio <= 0 or val_ratio < 0 or train_ratio + val_ratio >= 1:
             raise ValueError("train_ratio and val_ratio must satisfy: train_ratio>0, val_ratio>=0, sum<1.")
         shuffled = list(samples)
@@ -242,6 +285,7 @@ class ManagerAgent:
         min_token_length: int,
         smoothing: float,
     ) -> Tuple[float, ProcessingAgent, ClassifierAgent]:
+        """Train one processing/classifier configuration and return validation accuracy."""
         processing = ProcessingAgent(
             include_bigrams=include_bigrams, min_token_length=min_token_length
         )
@@ -256,6 +300,7 @@ class ManagerAgent:
         return val_acc, processing, classifier
 
     def run_iterative_training(self, samples: Sequence[NewsSample]) -> Dict[str, float]:
+        """Search candidate configurations and evaluate selected model on test split."""
         if len(samples) < MIN_SAMPLES_REQUIRED:
             raise ValueError(
                 f"Provide at least {MIN_SAMPLES_REQUIRED} labeled samples for training and evaluation."
@@ -284,6 +329,7 @@ class ManagerAgent:
         return {"validation_accuracy": self.best_validation_accuracy, "test_accuracy": test_accuracy}
 
     def predict_with_justification(self, text: str) -> Dict[str, str]:
+        """Predict market direction and return an explanation grounded in text tokens."""
         if not self.best_processing_agent or not self.best_classifier_agent:
             raise ValueError("Model is not trained. Call run_iterative_training first.")
         tokens = self.best_processing_agent.tokenize(text)
@@ -297,6 +343,7 @@ class ManagerAgent:
     def generate_manual_evaluation_rows(
         self, samples: Sequence[NewsSample], limit: int = 20
     ) -> List[Dict[str, str]]:
+        """Create rows for manual explanation evaluation on a sample subset."""
         if not self.best_processing_agent or not self.best_classifier_agent:
             raise ValueError("Model is not trained. Call run_iterative_training first.")
         tokenized = [self.best_processing_agent.tokenize(sample.text) for sample in samples]
@@ -313,6 +360,7 @@ class ManagerAgent:
 
 
 def _write_manual_eval_csv(rows: Iterable[Dict[str, str]], output_path: str) -> None:
+    """Write manual evaluation rows to CSV if at least one row is present."""
     rows_list = list(rows)
     if not rows_list:
         return
@@ -323,6 +371,7 @@ def _write_manual_eval_csv(rows: Iterable[Dict[str, str]], output_path: str) -> 
 
 
 def main() -> None:
+    """CLI entrypoint for iterative training and explainable prediction demo."""
     parser = argparse.ArgumentParser(description="Agent-based stock prediction from financial news")
     parser.add_argument("--dataset", required=True, help="Path to CSV dataset")
     parser.add_argument(

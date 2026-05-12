@@ -3,8 +3,10 @@ import tempfile
 import unittest
 
 from stock_prediction_agents import (
+    ClassifierAgent,
     ManagerAgent,
     NewsSample,
+    ProcessingAgent,
     load_financial_news_csv,
 )
 
@@ -62,6 +64,24 @@ class StockPredictionAgentTests(unittest.TestCase):
         self.assertEqual(len(data), 2)
         self.assertEqual(data[0].label, 1)
         self.assertEqual(data[1].label, 0)
+
+    def test_input_validation_and_helper_modularity(self):
+        with self.assertRaises(ValueError):
+            ProcessingAgent(min_token_length=0)
+        with self.assertRaises(ValueError):
+            ClassifierAgent(smoothing=-0.1)
+
+        classifier = ClassifierAgent()
+        with self.assertRaises(ValueError):
+            classifier.fit([[], []], [0, 1])
+
+        manager = ManagerAgent()
+        with self.assertRaises(ValueError):
+            manager._split_data([NewsSample("x", 1)] * 10, train_ratio=0.8, val_ratio=0.3)
+
+        self.assertEqual(ClassifierAgent._direction_from_impact(1.5), "bullish")
+        self.assertEqual(ClassifierAgent._direction_from_impact(-0.5), "bearish")
+        self.assertEqual(ClassifierAgent._direction_from_impact(0.0), "neutral")
 
 
 if __name__ == "__main__":
