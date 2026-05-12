@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
 TOKEN_PATTERN = re.compile(r"[a-zA-Z][a-zA-Z0-9']+")
 MIN_SAMPLES_REQUIRED = 10
+REQUIRED_SEARCH_KEYS = {"include_bigrams", "min_token_length", "smoothing"}
 DEFAULT_SEARCH_SPACE = [
     {"include_bigrams": False, "min_token_length": 2, "smoothing": 1.0},
     {"include_bigrams": True, "min_token_length": 2, "smoothing": 1.0},
@@ -146,7 +147,7 @@ class ClassifierAgent:
             return "No strong token-level evidence was found."
         fragments = []
         for token, impact in ranked:
-            direction = "bullish" if impact >= 0 else "bearish"
+            direction = "bullish" if impact > 0 else "bearish" if impact < 0 else "neutral"
             fragments.append(f"{token}({direction},{impact:.2f})")
         return "Top evidence tokens: " + ", ".join(fragments)
 
@@ -190,7 +191,7 @@ class ManagerAgent:
         raw_space = list(search_space) if search_space is not None else list(DEFAULT_SEARCH_SPACE)
         self.search_space = []
         for candidate in raw_space:
-            if not {"include_bigrams", "min_token_length", "smoothing"} <= set(candidate):
+            if not REQUIRED_SEARCH_KEYS <= set(candidate):
                 raise ValueError(
                     "Each search-space candidate must define include_bigrams, "
                     "min_token_length, and smoothing."

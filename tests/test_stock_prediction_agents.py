@@ -44,6 +44,12 @@ class StockPredictionAgentTests(unittest.TestCase):
                 self.assertEqual(len(manual_rows), 5)
                 self.assertIn("manual_score_1_to_5", manual_rows[0])
 
+        manager_a = ManagerAgent(random_seed=7)
+        manager_b = ManagerAgent(random_seed=7)
+        metrics_a = manager_a.run_iterative_training(samples)
+        metrics_b = manager_b.run_iterative_training(samples)
+        self.assertEqual(metrics_a, metrics_b)
+
     def test_csv_loader_detects_supported_columns(self):
         with tempfile.NamedTemporaryFile("w+", newline="", suffix=".csv") as handle:
             writer = csv.DictWriter(handle, fieldnames=["headline", "movement"])
