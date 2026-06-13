@@ -17,7 +17,7 @@ flowchart TD
 
     subgraph AGENTS["Agent framework"]
         JACK{{"Manager Agent — Jack<br/>orchestrates, threshold gate"}}
-        AURORA["Processing Agent — Aurora<br/>join news↔prices, label move"]
+        AURORA["Processing Agent — Aurora<br/>join news↔prices, summarize, label move"]
         NADI["Classifier Agent — Nadi<br/>FinBERT → up/down/neutral"]
         SABINA["Evaluator Agent — Sabina<br/>accuracy / MAE, per-class"]
         FREDDI["Explanation Agent — Freddi<br/>Ollama text justification"]
@@ -37,7 +37,7 @@ flowchart TD
 | Agent | Owner | Role | Input | Output |
 |---|---|---|---|---|
 | Manager | Jack | Orchestrate loop, apply accuracy threshold, sample for explanation | `evaluation_report.json` | gate decision + `sample_for_explanation.csv` |
-| Processing | Aurora | Join `news`↔`prices`, derive next-day label | `news` + `prices` (DuckDB) | `processed_data.csv` |
+| Processing | Aurora | Join `news`↔`prices`, summarize article text, derive next-day label | `news` + `prices` (DuckDB) | `processed_data.csv` |
 | Classifier | Nadi | FinBERT sentiment → up/down/neutral | `processed_data.csv` | `predictions_test.csv` |
 | Evaluator | Sabina | Accuracy / MAE, per-class metrics | `predictions_test.csv` | `evaluation_report.json` |
 | Explanation | Freddi | Ollama-generated justification per prediction | `sample_for_explanation.csv` | `explanations.csv` |
@@ -57,7 +57,7 @@ Every agent→agent edge has a data contract (full spec in [`data_contracts.md`]
 
 ## Iterative improvement loop
 
-1. Aurora builds the labelled set from the DuckDB source (`news` joined to `prices`).
+1. Aurora builds the labelled set from the DuckDB source (`news` joined to `prices`) and summarizes the article text into `article_summary`.
 2. Nadi classifies with FinBERT.
 3. Sabina scores the test split (accuracy / MAE, per-class).
 4. Jack gates on the threshold (accuracy < 0.60 → loop back to Nadi to retune; otherwise proceed).

@@ -4,7 +4,7 @@ Agreed input/output formats between all agents. Column names are fixed; !!do not
 
 **Primary data source:** Yahoo Finance, loaded via dlt into DuckDB (see `yahoo_finance_dlt/yahoo_finance_pipeline.py`). Two tables: `news` (headlines) and `prices` (daily OHLCV). The Processing Agent joins them to build the training/test set.
 
-**Note on article text:** Yahoo Finance gives us a headline (`title`) and a short `summary` per article — no full body. We use `title` as the text input, renamed to `article_title` across the pipeline. FinBERT performs well on short financial headlines. `summary` is available if a richer text input is needed later.
+**Note on article text:** Yahoo Finance gives us a headline (`title`) and a short raw `summary` per article — no full body. The Processing Agent (Aurora) runs transformer-based **summarization** over the available text to produce a clean `article_summary`, and keeps `article_title` (the headline). FinBERT then classifies on this text. Headlines alone classify well; the generated summary gives a richer, normalised text input.
 
 ## Source — Yahoo Finance (dlt → DuckDB)
 
@@ -49,7 +49,7 @@ Daily OHLCV history (default 1y). Primary key `(ticker, date)`, write dispositio
 
 **Filename:** `processed_data.csv`
 
-Built by joining `news` to `prices` on `ticker` + publication day. For each article: take `close` on the publication trading day as `price_t` and `close` on the next trading day as `price_t1`; derive `pct_change` and `label`.
+Built by joining `news` to `prices` on `ticker` + publication day, plus a summarization step. For each article: take `close` on the publication trading day as `price_t` and `close` on the next trading day as `price_t1`; derive `pct_change` and `label`; generate `article_summary` from the article text.
 
 | Column | Type | Example | Notes |
 |---|---|---|---|
@@ -57,6 +57,7 @@ Built by joining `news` to `prices` on `ticker` + publication day. For each arti
 | date | string | 2026-06-12 | from `news.pub_date`, date part only, format YYYY-MM-DD |
 | ticker | string | AAPL | from `news.ticker` |
 | article_title | string | Apple beats earnings... | from `news.title`, no HTML or special characters |
+| article_summary | string | Apple reported record... | summarization output by Aurora over `news.title` + `news.summary`; may be empty if no source text |
 | price_t | float | 291.13 | `prices.close` on publication trading day |
 | price_t1 | float | 295.63 | `prices.close` on next trading day |
 | pct_change | float | 1.55 | percentage change T to T+1 |
