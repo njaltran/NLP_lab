@@ -4,6 +4,47 @@ Agreed input/output formats between all agents. Column names are fixed; !!do not
 
 **Note on article text:** The FNSPID dataset's full article body is unavailable in the HuggingFace version. We use `Article_title` (headline) as the text input, renamed to `article_title` across the pipeline. FinBERT performs well on short financial headlines.
 
+## Source — Yahoo Finance (dlt → DuckDB)
+
+Loaded by `yahoo_finance_dlt/yahoo_finance_pipeline.py` (dlt). DuckDB dataset `market_data`. Tickers configurable (default AAPL, MSFT, GOOG). Types below are the DuckDB columns dlt produces.
+
+Every table also has dlt system columns `_dlt_load_id` (string) and `_dlt_id` (string).
+
+### Table `prices`
+
+Daily OHLCV history (default 1y). Primary key `(ticker, date)`, write disposition `merge`, incremental on `date`.
+
+| Column | Type | Example | Notes |
+|---|---|---|---|
+| ticker | VARCHAR | AAPL | source ticker symbol |
+| date | TIMESTAMP WITH TIME ZONE | 2026-06-12T06:00:00+02:00 | bar timestamp; tz-aware |
+| open | DOUBLE | 290.10 | open price |
+| high | DOUBLE | 293.50 | session high |
+| low | DOUBLE | 288.20 | session low |
+| close | DOUBLE | 291.13 | close price |
+| volume | BIGINT | 38742100 | shares traded |
+| dividends | DOUBLE | 0.0 | dividend on the day |
+| stock_splits | DOUBLE | 0.0 | split ratio on the day |
+
+> To feed Handoff 1: `date` → `YYYY-MM-DD` string, `close` → `price_t`, next trading day `close` → `price_t1`.
+
+### Table `news`
+
+Latest ~10 articles per ticker (yfinance gives no deep history). Primary key `(ticker, id)`, write disposition `merge`, incremental on `pub_date`.
+
+| Column | Type | Example | Notes |
+|---|---|---|---|
+| ticker | VARCHAR | AAPL | source ticker symbol |
+| id | VARCHAR | 0606e28d-4eda-... | yahoo article id |
+| title | VARCHAR | Apple beats earnings... | headline |
+| summary | VARCHAR | An Indian pollution... | article summary, may be empty |
+| content_type | VARCHAR | STORY | yahoo content type |
+| pub_date | TIMESTAMP WITH TIME ZONE | 2026-06-13T10:33:55+02:00 | publish time; tz-aware |
+| url | VARCHAR | https://... | canonical article url |
+| publisher | VARCHAR | Reuters | provider display name |
+
+> Same article can appear under 2 tickers → 2 rows (PK includes ticker).
+
 ## Handoff 1 — Processing Agent (Aurora) → Classifier Agent (Nadi)
 
 **Filename:** `processed_data.csv`
