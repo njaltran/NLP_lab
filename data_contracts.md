@@ -88,6 +88,22 @@ All columns from Handoff 1, plus:
 | misclassified_count | integer | 148 | total number of wrong predictions |
 | misclassified_ids | list | ["0606e28d-4eda-...", ...] | article_ids of wrong predictions |
 
+## Handoff 3b — Manager Agent (Jack) → Classifier Agent (Nadi) — retune loop
+
+**Filename:** `retune_request.json`
+
+Sent only when `below_threshold = true` in Handoff 3. Tells Nadi to re-run with adjustments. Closes the iterative-improvement loop (Sabina → Jack → Nadi). When accuracy clears the threshold, no `retune_request.json` is written and the flow proceeds to Handoff 4.
+
+| Field | Type | Example | Notes |
+|---|---|---|---|
+| iteration | integer | 2 | loop counter, starts at 1 |
+| reason | string | accuracy 0.54 below target 0.60 | human-readable trigger |
+| current_accuracy | float | 0.54 | from the report that triggered the loop |
+| target_accuracy | float | 0.60 | threshold to clear |
+| focus_labels | list | ["down", "neutral"] | classes with lowest per-class accuracy to prioritise |
+| misclassified_ids | list | ["0606e28d-4eda-...", ...] | rows to inspect / reweight |
+| suggested_params | object | {"threshold": 0.5, "max_length": 128} | hyperparameters Nadi should try next |
+
 ## Handoff 4 — Manager Agent (Jack) → Explanation Agent (Freddi)
 
 **Filename:** `sample_for_explanation.csv`

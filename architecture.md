@@ -26,7 +26,7 @@ flowchart TD
     AURORA -->|"processed_data.csv"| NADI
     NADI -->|"predictions_test.csv"| SABINA
     SABINA -->|"evaluation_report.json"| JACK
-    JACK -->|"accuracy < 0.60<br/>retune & re-run (iterate)"| NADI
+    JACK -->|"retune_request.json<br/>(accuracy < 0.60)"| NADI
     JACK -->|"accuracy OK<br/>sample_for_explanation.csv"| FREDDI
     FREDDI -->|"explanations.csv"| JACK
     JACK -->|"30–50 rows"| HUMAN(["Manual evaluation<br/>(team scores 1–5)"])
@@ -41,6 +41,19 @@ flowchart TD
 | Classifier | Nadi | FinBERT sentiment → up/down/neutral | `processed_data.csv` | `predictions_test.csv` |
 | Evaluator | Sabina | Accuracy / MAE, per-class metrics | `predictions_test.csv` | `evaluation_report.json` |
 | Explanation | Freddi | Ollama-generated justification per prediction | `sample_for_explanation.csv` | `explanations.csv` |
+
+## Interaction contracts
+
+Every agent→agent edge has a data contract (full spec in [`data_contracts.md`](./data_contracts.md)):
+
+| From → To | Contract | When |
+|---|---|---|
+| Aurora → Nadi | `processed_data.csv` | every run |
+| Nadi → Sabina | `predictions_test.csv` | every run |
+| Sabina → Jack | `evaluation_report.json` | every run |
+| Jack → Nadi | `retune_request.json` | only if accuracy < 0.60 (loop) |
+| Jack → Freddi | `sample_for_explanation.csv` | after threshold cleared |
+| Freddi → Jack | `explanations.csv` | after explanations generated |
 
 ## Iterative improvement loop
 
