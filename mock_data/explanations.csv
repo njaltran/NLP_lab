@@ -1,0 +1,7 @@
+article_id,article_title,predicted_label,actual_label,confidence,explanation,manual_score
+FNSPID_00001,Apple unveils new iPhone lineup as analysts turn upbeat,up,up,0.88,Headline signals a strong product launch with positive analyst sentiment which supports an upward move.,5
+FNSPID_00003,Tesla recalls vehicles over software glitch,down,down,0.90,Recall and software fault are negative catalysts that typically push the stock lower the next session.,4
+FNSPID_00005,Nvidia announces stock split as shares hold steady,neutral,neutral,0.61,A stock split does not change fundamentals so little next-day movement is expected.,
+FNSPID_00008,Netflix subscriber growth tops forecasts,up,up,0.92,A clear subscriber beat is a positive surprise that drives the stock higher.,5
+FNSPID_00010,Intel delays next-gen chip launch,neutral,down,0.53,Model predicted neutral but a product delay is a negative catalyst so the down move was missed.,
+FNSPID_00011,Apple supply chain concerns ease,up,neutral,0.50,Model leaned up yet easing supply concerns were already priced in so the move stayed flat.,
