@@ -1,0 +1,25 @@
+{
+  "accuracy": 0.67,
+  "below_threshold": false,
+  "class_accuracy": {
+    "up": 0.80,
+    "down": 0.75,
+    "neutral": 0.33
+  },
+  "misclassified_count": 4,
+  "misclassified_ids": [
+    "FNSPID_00006",
+    "FNSPID_00010",
+    "FNSPID_00011",
+    "FNSPID_00012"
+  ],
+  "proposal": {
+    "recommended_action": "proceed",
+    "reason": "accuracy 0.67 clears the 0.60 target; neutral class is weakest (0.33) but the iteration budget favours proceeding",
+    "focus_labels": [
+      "neutral"
+    ],
+    "suggested_params": {},
+    "code_notes": "threshold hardcoded at 0.5 in classifier.py; the neutral band (+/-1%) may be too narrow for the neutral class"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "final_accuracy": 0.67,
+  "loop_iterations": 2,
+  "class_accuracy": {
+    "up": 0.80,
+    "down": 0.75,
+    "neutral": 0.33
+  },
+  "test_set_size": 12,
+  "explanations_generated": 6,
+  "manually_scored": 3
+}

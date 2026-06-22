@@ -1,0 +1,13 @@
+article_id,date,ticker,article_title,price_t,price_t1,pct_change,label,predicted_label,confidence,explanation,manual_score
+FNSPID_00001,2021-03-15,AAPL,Apple unveils new iPhone lineup as analysts turn upbeat,121.03,125.12,3.38,up,up,0.88,Headline signals a strong product launch with positive analyst sentiment which supports an upward move.,5
+FNSPID_00002,2021-04-02,MSFT,Microsoft cloud revenue beats expectations,242.35,248.00,2.33,up,up,0.81,,
+FNSPID_00003,2021-05-10,TSLA,Tesla recalls vehicles over software glitch,672.37,629.04,-6.44,down,down,0.90,Recall and software fault are negative catalysts that typically push the stock lower the next session.,4
+FNSPID_00004,2021-06-21,AMZN,Amazon faces antitrust scrutiny in Europe,167.10,165.00,-1.26,down,down,0.68,,
+FNSPID_00005,2021-07-08,NVDA,Nvidia announces stock split as shares hold steady,195.00,195.80,0.41,neutral,neutral,0.61,A stock split does not change fundamentals so little next-day movement is expected.,
+FNSPID_00006,2021-08-12,GOOG,Google ad sales steady amid market caution,137.50,137.10,-0.29,neutral,down,0.57,,
+FNSPID_00007,2021-09-15,META,Meta invests heavily in VR as investors stay wary,376.00,369.50,-1.73,down,down,0.74,,
+FNSPID_00008,2021-10-20,NFLX,Netflix subscriber growth tops forecasts,615.00,640.20,4.10,up,up,0.92,A clear subscriber beat is a positive surprise that drives the stock higher.,5
+FNSPID_00009,2021-11-03,AMD,AMD lands major data center contract,120.50,126.30,4.81,up,up,0.85,,
+FNSPID_00010,2021-12-01,INTC,Intel delays next-gen chip launch,52.00,51.20,-1.54,down,neutral,0.53,Model predicted neutral but a product delay is a negative catalyst so the down move was missed.,
+FNSPID_00011,2022-01-25,AAPL,Apple supply chain concerns ease,160.00,161.10,0.69,neutral,up,0.50,Model leaned up yet easing supply concerns were already priced in so the move stayed flat.,
+FNSPID_00012,2022-02-14,MSFT,Microsoft announces Activision acquisition,295.00,300.50,1.86,up,neutral,0.55,,

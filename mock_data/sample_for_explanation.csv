@@ -1,0 +1,7 @@
+article_id,article_title,predicted_label,actual_label,confidence,prob_up,prob_down,prob_neutral
+FNSPID_00001,Apple unveils new iPhone lineup as analysts turn upbeat,up,up,0.88,0.88,0.04,0.08
+FNSPID_00003,Tesla recalls vehicles over software glitch,down,down,0.90,0.03,0.90,0.07
+FNSPID_00005,Nvidia announces stock split as shares hold steady,neutral,neutral,0.61,0.22,0.17,0.61
+FNSPID_00008,Netflix subscriber growth tops forecasts,up,up,0.92,0.92,0.02,0.06
+FNSPID_00010,Intel delays next-gen chip launch,neutral,down,0.53,0.07,0.40,0.53
+FNSPID_00011,Apple supply chain concerns ease,up,neutral,0.50,0.50,0.09,0.41

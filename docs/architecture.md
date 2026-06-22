@@ -10,18 +10,18 @@ flowchart TD
     YF["Yahoo Finance<br/>(yfinance)"] -->|closing prices T and T+1| AURORA
 
     subgraph AGENTS["Agent framework"]
-        JACK{{"Manager Agent — Jack<br/>orchestrates, threshold gate"}}
+        JACK{{"Manager Agent — Jack<br/>decides on proposal, threshold gate"}}
         AURORA["Processing Agent — Aurora<br/>join headlines↔prices, label move"]
-        NADI["Classifier Agent — Nadi<br/>FinBERT → up/down/neutral"]
-        SABINA["Evaluator Agent — Sabina<br/>accuracy, per-class metrics"]
+        NADI["Classifier Agent — Nadi<br/>generates classifier.py (FinBERT) → up/down/neutral"]
+        SABINA["Evaluator Agent — Sabina<br/>review code + score results, propose"]
         FREDDI["Explanation Agent — Freddi<br/>Ollama text justification"]
     end
 
     AURORA -->|"processed_data.csv"| NADI
-    NADI -->|"predictions_test.csv"| SABINA
-    SABINA -->|"evaluation_report.json"| JACK
-    JACK -->|"accuracy < 0.60<br/>retune & re-run (iterate)"| NADI
-    JACK -->|"accuracy OK<br/>sample_for_explanation.csv"| FREDDI
+    NADI -->|"classifier.py + predictions_test.csv"| SABINA
+    SABINA -->|"evaluation_report.json<br/>(metrics + proposal)"| JACK
+    JACK -->|"decision: retune<br/>retune_request.json (iterate)"| NADI
+    JACK -->|"decision: proceed<br/>sample_for_explanation.csv"| FREDDI
     FREDDI -->|"explanations.csv"| JACK
     JACK -->|"30–50 rows"| HUMAN(["Manual evaluation<br/>(team scores 1–5)"])
 ```
@@ -39,18 +39,18 @@ FNSPID's full article body is unavailable in the HuggingFace version — `articl
 
 | Agent | Owner | Role | Input | Output |
 |---|---|---|---|---|
-| Manager | Jack | Orchestrate loop, apply accuracy threshold, sample for explanation | `evaluation_report.json` | gate decision + `sample_for_explanation.csv` |
+| Manager | Jack | Decide on Sabina's proposal (accept/override), apply accuracy threshold, sample for explanation | `evaluation_report.json` | `decision.json` + (`retune_request.json` \| `sample_for_explanation.csv`) |
 | Processing | Aurora | Join FNSPID headlines to yfinance prices on date + ticker, derive next-day label | FNSPID + yfinance | `processed_data.csv` |
-| Classifier | Nadi | FinBERT sentiment → up/down/neutral | `processed_data.csv` | `predictions_test.csv` |
-| Evaluator | Sabina | Accuracy and per-class metrics on test split | `predictions_test.csv` | `evaluation_report.json` |
+| Classifier | Nadi | Generate the classifier as Python (FinBERT) → up/down/neutral, run it | `processed_data.csv` (+ `retune_request.json` on loop) | `classifier.py` + `predictions_test.csv` |
+| Evaluator | Sabina | Review generated code + score results on test split, propose next action | `classifier.py` + `predictions_test.csv` | `evaluation_report.json` (metrics + proposal) |
 | Explanation | Freddi | Ollama-generated justification per prediction (~300 rows) | `sample_for_explanation.csv` | `explanations.csv` |
 
 ## Iterative improvement loop
 
 1. Aurora joins FNSPID headlines to yfinance closing prices on `date` + `ticker`, calculates percentage change, assigns labels (>+1% = up, <-1% = down, in between = neutral), outputs `processed_data.csv`.
-2. Nadi classifies the test split with FinBERT.
-3. Sabina calculates accuracy and per-class metrics, outputs `evaluation_report.json`.
-4. Jack checks the threshold — accuracy < 0.60 → loop back to Nadi to retune and re-run; otherwise proceed.
+2. Nadi generates `classifier.py` (FinBERT), runs it on the test split, and outputs `predictions_test.csv`.
+3. Sabina reviews `classifier.py` and scores the results (accuracy + per-class metrics), then outputs `evaluation_report.json` containing those metrics **and a proposal** (recommended action, focus labels, suggested params, code notes).
+4. Jack **decides** on Sabina's proposal (accept or override), recording it in `decision.json`. If the decision is to retune, he writes `retune_request.json` back to Nadi to regenerate the code; otherwise he proceeds. Jack owns the threshold gate and the final call.
 5. Once cleared, Jack samples ~300 rows and sends to Freddi for text justifications.
 6. Team manually evaluates 30–50 explanations (score 1–5) — the second evaluation axis alongside accuracy.
 
