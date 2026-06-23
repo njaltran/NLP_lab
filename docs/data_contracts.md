@@ -2,6 +2,8 @@
 
 Agreed input/output formats between all agents. Column names are fixed; !!do not change without telling the whole team!!
 
+**Mock data:** valid sample files for every handoff below live in [`mock_data/`](./mock_data/) (see [`mock_data/README.md`](./mock_data/README.md)) — build and test each agent against them before the upstream agent exists.
+
 **News source:** FNSPID dataset (`Zihan1004/FNSPID` on HuggingFace), streamed and sampled by target ticker list. Provides `article_title` (headline). Full article body is unavailable in the HuggingFace version — headline is sufficient for FinBERT.
 
 **Price source:** Yahoo Finance via yfinance (`Ticker.history()`). Used only for closing prices on T and T+1. Weekends and holidays are handled automatically — T+1 is always the next available trading day.
@@ -25,9 +27,17 @@ Built by joining FNSPID headlines to yfinance prices on `ticker` + publication d
 
 ## Handoff 2 — Classifier Agent (Nadi) → Evaluator Agent (Sabina)
 
-**Filename:** `predictions_test.csv`
+**Filenames:** `classifier.py` and `predictions_test.csv`
 
-Nadi receives `processed_data.csv` from Aurora and adds three columns. The file passed to Sabina contains all of the following:
+Nadi is a code-generation agent: it **generates the classifier as a Python script** (`classifier.py`), runs it on the test split, and passes both the generated code and its results to Sabina. Sabina reviews the code and scores the results — she does **not** re-execute the code.
+
+### `classifier.py`
+
+The Python Nadi generated to produce the predictions. Sabina reads it to ground her proposal (e.g. spotting a hardcoded threshold or `max_length`). Must run standalone with `processed_data.csv` as input and write `predictions_test.csv`.
+
+### `predictions_test.csv`
+
+Nadi receives `processed_data.csv` from Aurora and adds the prediction columns. The file passed to Sabina contains all of the following:
 
 | Column | Type | Example | Notes |
 |---|---|---|---|
@@ -40,12 +50,17 @@ Nadi receives `processed_data.csv` from Aurora and adds three columns. The file 
 | pct_change | float | 3.38 | from Aurora — do not modify |
 | label | string | up | ground truth from Aurora — do not modify |
 | predicted_label | string | up | **added by Nadi** — allowed values: up, down, neutral |
-| confidence | float | 0.87 | **added by Nadi** — score between 0 and 1 |
+| confidence | float | 0.87 | **added by Nadi** — top class probability, 0–1 (equals the max of the three `prob_*` columns) |
+| prob_up | float | 0.87 | **added by Nadi** — softmax probability for `up` |
+| prob_down | float | 0.05 | **added by Nadi** — softmax probability for `down` |
+| prob_neutral | float | 0.08 | **added by Nadi** — softmax probability for `neutral` (`prob_up + prob_down + prob_neutral ≈ 1`) |
 | split | string | test | **added by Nadi** — all rows in this file must be test rows only |
 
 ## Handoff 3 — Evaluator Agent (Sabina) → Manager Agent (Jack)
 
 **Filename:** `evaluation_report.json`
+
+Sabina scores the results, reviews `classifier.py`, and **makes a proposal**. She does not act on it — Jack decides (Handoff 3b). The report carries metrics plus a `proposal` object.
 
 | Field | Type | Example | Notes |
 |---|---|---|---|
@@ -54,22 +69,48 @@ Nadi receives `processed_data.csv` from Aurora and adds three columns. The file 
 | class_accuracy | object | {"up": 0.71, "down": 0.58, "neutral": 0.61} | accuracy per label |
 | misclassified_count | integer | 148 | total number of wrong predictions |
 | misclassified_ids | list | ["FNSPID_00423", ...] | article_ids of wrong predictions |
+| proposal | object | see below | **Sabina's recommendation** — Jack decides whether to apply it |
 
-## Handoff 3b — Manager Agent (Jack) → Classifier Agent (Nadi) — retune loop
+### `proposal` object
 
-**Filename:** `retune_request.json`
+| Field | Type | Example | Notes |
+|---|---|---|---|
+| recommended_action | string | retune | `retune` or `proceed` — Sabina's recommendation only, not a decision |
+| reason | string | accuracy 0.54 below target; down-class weakest | human-readable justification |
+| focus_labels | list | ["down", "neutral"] | classes with lowest per-class accuracy to prioritise |
+| suggested_params | object | {"threshold": 0.5, "max_length": 128} | hyperparameters Nadi should try next |
+| code_notes | string | threshold hardcoded at 0.5 in classifier.py | observations from reviewing the generated code; empty string if none |
 
-Sent only when `below_threshold = true` in Handoff 3. Tells Nadi to re-run with adjustments. When accuracy clears the threshold, no `retune_request.json` is written and the flow proceeds to Handoff 4.
+## Handoff 3b — Manager Agent (Jack) — decision
+
+Jack **decides** on Sabina's proposal and records it in `decision.json`. If the decision resolves to retune, he also writes `retune_request.json` to Nadi carrying the approved proposal. If it resolves to proceed, no `retune_request.json` is written and the flow goes to Handoff 4.
+
+Jack owns the threshold gate and the final call; Sabina only recommends. Jack may **override** the proposal — change params/focus, or proceed despite a `retune` recommendation (e.g. when the iteration cap is hit).
+
+### `decision.json` (Jack's record)
 
 | Field | Type | Example | Notes |
 |---|---|---|---|
 | iteration | integer | 2 | loop counter, starts at 1 |
+| decision | string | accept | `accept` (use proposal as-is) or `override` (Jack changed it) |
+| final_action | string | retune | `retune` or `proceed` — what actually happens |
+| based_on_proposal | object | {...} | the `proposal` block from the report Jack decided on |
+| overrides | object | {"max_length": 256} | only if `decision = override` — fields Jack changed; empty object otherwise |
+| notes | string | iteration cap not reached; applying proposal | Jack's rationale |
+
+### `retune_request.json` (Jack → Nadi, only when `final_action = retune`)
+
+The approved proposal Nadi acts on — Sabina's proposal as accepted or overridden by Jack.
+
+| Field | Type | Example | Notes |
+|---|---|---|---|
+| iteration | integer | 2 | loop counter, matches `decision.json` |
 | reason | string | accuracy 0.54 below target 0.60 | human-readable trigger |
 | current_accuracy | float | 0.54 | from the report that triggered the loop |
 | target_accuracy | float | 0.60 | threshold to clear |
-| focus_labels | list | ["down", "neutral"] | classes with lowest per-class accuracy to prioritise |
+| focus_labels | list | ["down", "neutral"] | approved focus classes |
 | misclassified_ids | list | ["FNSPID_00423", ...] | rows to inspect or reweight |
-| suggested_params | object | {"threshold": 0.5, "max_length": 128} | hyperparameters Nadi should try next |
+| suggested_params | object | {"threshold": 0.5, "max_length": 128} | approved hyperparameters Nadi regenerates the code with |
 
 ## Handoff 4 — Manager Agent (Jack) → Explanation Agent (Freddi)
 
@@ -83,13 +124,16 @@ Sent only when `below_threshold = true` in Handoff 3. Tells Nadi to re-run with 
 | article_title | string | Apple beats earnings... | headline from Processing Agent |
 | predicted_label | string | up | final prediction after loop converges |
 | actual_label | string | up | ground truth label from Processing Agent |
-| confidence | float | 0.87 | model confidence score |
+| confidence | float | 0.87 | model confidence score (top class probability) |
+| prob_up | float | 0.87 | softmax probability for `up` — from Nadi via `predictions_test.csv` |
+| prob_down | float | 0.05 | softmax probability for `down` — so Freddi can note how close the call was |
+| prob_neutral | float | 0.08 | softmax probability for `neutral` |
 
 ## Handoff 5 — Explanation Agent (Freddi) → Manager Agent (Jack)
 
 **Filename:** `explanations.csv`
 
-Freddi receives `sample_for_explanation.csv` from Jack and adds two columns. The file returned to Jack contains all of the following:
+Freddi receives `sample_for_explanation.csv` from Jack and adds two columns. The `prob_*` columns are inputs for Freddi's reasoning and need not be echoed in this output. The file returned to Jack contains all of the following:
 
 | Column | Type | Example | Notes |
 |---|---|---|---|
