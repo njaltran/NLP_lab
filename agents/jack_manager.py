@@ -85,11 +85,20 @@ def decide(state: ManagerState) -> dict:
     note = (f"iteration {iteration}: accuracy {accuracy:.2f} vs target "
             f"{state['target_accuracy']:.2f} — {why}")
 
+    # Override = the gate's action disagrees with Sabina's recommendation
+    # (e.g. she says retune but the cap forces proceed). Else accept.
+    recommended = report.get("proposal", {}).get("recommended_action")
+    if recommended is not None and recommended != final_action:
+        decision, overrides = "override", {"final_action": final_action}
+    else:
+        decision, overrides = "accept", {}
+
     return {
         "iteration": iteration,     # saved → next invocation resumes from here
         "accuracy": accuracy,
         "final_action": final_action,
-        "decision": "accept",       # LLM may flip to "override" in step 5
+        "decision": decision,
+        "overrides": overrides,
         "notes": note,              # plain field → overwrites
         "decision_log": [note],     # reducer field → appended
     }
