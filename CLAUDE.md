@@ -61,7 +61,7 @@ uv sync                 # deps
 uv run agents/<your_agent>.py
 ```
 
-Add a new dependency to **both** `requirements.txt` and `pyproject.toml` (the latter currently lists none — see `CLAUDE.md`).
+Add a new dependency to **both** `requirements.txt` and `pyproject.toml`.
 
 ## Definition of done (per agent)
 

@@ -2,7 +2,7 @@
 
 Agreed input/output formats between all agents. Column names are fixed; !!do not change without telling the whole team!!
 
-**Mock data:** valid sample files for every handoff below live in [`mock_data/`](./mock_data/) (see [`mock_data/README.md`](./mock_data/README.md)) — build and test each agent against them before the upstream agent exists.
+**Mock data:** valid sample files for every handoff below live in [`mock_data/`](../mock_data/) (see [`mock_data/README.md`](../mock_data/README.md)) — build and test each agent against them before the upstream agent exists.
 
 **News source:** FNSPID dataset (`Zihan1004/FNSPID` on HuggingFace), streamed and sampled by target ticker list. Provides `article_title` (headline). Full article body is unavailable in the HuggingFace version — headline is sufficient for FinBERT.
 
