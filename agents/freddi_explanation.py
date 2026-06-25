@@ -54,24 +54,31 @@ DEFAULT_OLLAMA_URL = "http://localhost:11434"
 
 
 def build_prompt(row: dict) -> str:
-    """Turn one input row into an Ollama prompt asking for a one-sentence reason."""
-    agreement = (
-        "The model's prediction matched the actual move."
-        if row.get("predicted_label") == row.get("actual_label")
-        else "The model's prediction did NOT match the actual move."
-    )
+    """Build the Ollama prompt for one row — Option A, "explain the prediction only".
+
+    The model is given the headline and the model's predicted next-day move, and
+    explains why that headline could justify that move. It is deliberately NOT given
+    the actual next-day outcome: that mirrors real prediction time (tomorrow's price
+    is unknown) and keeps this to the assigned "explain your reasoning" task. The
+    actual_label is still written to explanations.csv for the human graders — it just
+    never reaches the model, so the explanation can't defend a known-wrong answer.
+    """
+    move_phrase = {
+        "up": "an upward next-day move",
+        "down": "a downward next-day move",
+        "neutral": "little or no next-day move",
+    }.get((row.get("predicted_label") or "").strip(), "the predicted next-day move")
     return (
-        "You are a financial analyst explaining a stock-move model's output.\n"
-        "Given a news headline and the model's prediction, write ONE concise "
-        "sentence (max ~30 words) explaining why the predicted next-day move is "
-        "plausible. Refer to the headline content. Do not add a preamble.\n\n"
+        "You explain a stock-move model's prediction in plain language.\n"
+        "Given a news headline and the model's predicted next-day move, write ONE "
+        "clear sentence (max ~25 words) explaining why the headline could justify "
+        "that move. Use only what the headline states — do not invent facts, numbers, "
+        "or events. Do not add a preamble or restate the task.\n\n"
         f"Headline: {row.get('article_title', '')}\n"
-        f"Predicted move: {row.get('predicted_label', '')}\n"
-        f"Actual move: {row.get('actual_label', '')}\n"
+        f"Predicted move: {move_phrase}\n"
         f"Model confidence: {row.get('confidence', '')}\n"
         f"Class probabilities -> up: {row.get('prob_up', '')}, "
-        f"down: {row.get('prob_down', '')}, neutral: {row.get('prob_neutral', '')}\n"
-        f"Note: {agreement}\n\n"
+        f"down: {row.get('prob_down', '')}, neutral: {row.get('prob_neutral', '')}\n\n"
         "Explanation:"
     )
 
