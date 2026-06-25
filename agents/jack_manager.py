@@ -142,9 +142,11 @@ def proceed(state: ManagerState) -> dict:
                      "confidence", "prob_up", "prob_down", "prob_neutral"]]
               .rename(columns={"label": "actual_label"}))
     n = min(len(sample), state.get("sample_size", 300))
+    if n < len(sample):                                   # only subsample when needed
+        sample = sample.sample(n=n, random_state=42)      # representative + reproducible
     _write_decision(state)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    sample.head(n).to_csv(os.path.join(OUTPUT_DIR, "sample_for_explanation.csv"), index=False)
+    sample.to_csv(os.path.join(OUTPUT_DIR, "sample_for_explanation.csv"), index=False)
     return {"decision_log": [f"iteration {state['iteration']}: wrote sample_for_explanation.csv ({n} rows)"]}
 
 
