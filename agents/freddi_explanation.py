@@ -100,27 +100,22 @@ def fallback_explanation(row: dict) -> str:
     """Deterministic placeholder used when Ollama is unavailable.
 
     Produces a plausible, contract-valid sentence so the pipeline runs offline.
-    Replaced automatically by real Ollama output once the server is reachable.
+    Like the real prompt (Option A), it explains the prediction from the headline
+    only and never references the actual next-day outcome. Replaced automatically
+    by real Ollama output once the server is reachable.
     """
     title = (row.get("article_title") or "the headline").strip()
     pred = (row.get("predicted_label") or "").strip()
-    actual = (row.get("actual_label") or "").strip()
-    matched = pred == actual
 
     direction = {
         "up": "an upward next-day move",
         "down": "a downward next-day move",
-        "neutral": "little next-day movement",
-    }.get(pred, "the predicted move")
+        "neutral": "little or no next-day move",
+    }.get(pred, "the predicted next-day move")
 
-    if matched:
-        return _clean(
-            f'The headline "{title}" reads as a {pred or "neutral"} signal, '
-            f"which supports {direction}."
-        )
     return _clean(
-        f'The model predicted {pred or "neutral"} from "{title}", but the actual '
-        f"move was {actual or 'different'}, so this call was missed."
+        f'The headline "{title}" reads as a {pred or "neutral"} signal for the stock, '
+        f"which is consistent with {direction}."
     )
 
 
