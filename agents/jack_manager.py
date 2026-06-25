@@ -180,6 +180,32 @@ def finalize(state: ManagerState) -> dict:
 
 LLAMA_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 
+# Engineered with the lecture's components: Persona (line 1), Sections (### ),
+# CAPITALS (the determinism boundary), Output (plain prose), Example (one-shot).
+# Thinking/CoT deliberately omitted — the task is too simple to need it.
+RATIONALE_SYSTEM_PROMPT = """You are the MANAGER AGENT of an ML pipeline — a precise, \
+factual orchestrator who explains decisions for a human audit log.
+
+### CONTEXT ###
+A retune-vs-proceed decision has ALREADY been made by a deterministic accuracy gate.
+You did NOT make it and you CANNOT change it.
+
+### YOUR TASK ###
+Write a 2-3 sentence rationale explaining WHY the decision is reasonable, grounded in
+the accuracy, the target, and the evaluator's proposal.
+
+### CONSTRAINTS ###
+- DO NOT dispute, second-guess, or suggest changing the decision.
+- Output PLAIN PROSE ONLY — no code, JSON, markdown, lists, or preamble.
+- Be factual and concise. No marketing tone.
+
+### EXAMPLE ###
+Input  — Decision: proceed at iteration 2. Accuracy 0.67 vs target 0.60. Proposal: proceed.
+Output — Test accuracy of 0.67 clears the 0.60 target, so the gate proceeds to the \
+explanation stage. The evaluator agreed; though the neutral class remains weakest, the \
+iteration budget favours moving forward.
+"""
+
 
 def _llama_rationale(state: ManagerState) -> str:
     """Ask Llama for a short rationale. Falls back to the gate's deterministic
@@ -191,22 +217,25 @@ def _llama_rationale(state: ManagerState) -> str:
     from huggingface_hub import InferenceClient
 
     proposal = state["evaluation_report"].get("proposal", {})
-    client = InferenceClient(model=LLAMA_MODEL, token=token)
-    resp = client.chat_completion(
-        messages=[
-            {"role": "system", "content": (
-                "You are the Manager of an ML pipeline. The retune/proceed decision "
-                "is ALREADY made by a deterministic gate — do NOT change or dispute it. "
-                "Write 2-3 factual sentences explaining it for a human log.")},
-            {"role": "user", "content": (
-                f"Decision: {state['final_action']} at iteration {state['iteration']}. "
-                f"Test accuracy {state['accuracy']:.2f} vs target "
-                f"{state['target_accuracy']:.2f}. Evaluator proposal: {proposal}.")},
-        ],
-        max_tokens=160,
-        temperature=0.3,
-    )
-    return resp.choices[0].message.content.strip()
+    # Any HF failure (rate limit, gated-model 403, timeout, malformed response)
+    # must not abort the graph — the gate's decision still needs to be written.
+    # Fall back to the deterministic note, mirroring the no-token branch above.
+    try:
+        client = InferenceClient(model=LLAMA_MODEL, token=token)
+        resp = client.chat_completion(
+            messages=[
+                {"role": "system", "content": RATIONALE_SYSTEM_PROMPT},
+                {"role": "user", "content": (
+                    f"Decision: {state['final_action']} at iteration {state['iteration']}. "
+                    f"Test accuracy {state['accuracy']:.2f} vs target "
+                    f"{state['target_accuracy']:.2f}. Evaluator proposal: {proposal}.")},
+            ],
+            max_tokens=160,
+            temperature=0.3,
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception as e:
+        return state["notes"] + f" (LLM failed: {e})"
 
 
 def rationale(state: ManagerState) -> dict:
@@ -237,6 +266,13 @@ def build_graph(checkpointer):
 
 if __name__ == "__main__":
     from langgraph.checkpoint.sqlite import SqliteSaver
+
+    # Fresh checkpoint each run: the on-disk DB persists across processes, so a
+    # stale "demo" thread would resume the prior run's terminal state and drift
+    # the iteration counter. Remove it so the demo is a self-contained smoke test.
+    if os.path.exists("manager_state.sqlite"):
+        os.remove("manager_state.sqlite")
+        print("Removed prior manager_state.sqlite for a fresh demo run.")
 
     cfg = {"configurable": {"thread_id": "demo"}}
     base = {"target_accuracy": 0.60, "max_iterations": 5,
