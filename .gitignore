@@ -219,3 +219,4 @@ __marimo__/
 .dlt
 # LangGraph checkpointer db
 manager_state.sqlite
+outputs/

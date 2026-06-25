@@ -22,7 +22,7 @@ If code and these docs disagree, the docs win — fix the code or update the doc
 
 | Agent | Owner | Builds | Reads | Writes |
 |---|---|---|---|---|
-| Manager | Jack | orchestration loop + threshold gate + final output | `evaluation_report.json`, `explanations.csv` | `retune_request.json`, `sample_for_explanation.csv`, `final_results.csv`, `final_report.json` |
+| Manager | Jack | orchestration loop + threshold gate + final output | `evaluation_report.json`, `predictions_test.csv`, `explanations.csv` | `decision.json`, `retune_request.json`, `sample_for_explanation.csv`, `final_results.csv`, `final_report.json` |
 | Processing | Aurora | join FNSPID headlines ↔ yfinance prices, label move | FNSPID, yfinance | `processed_data.csv` |
 | Classifier | Nadi | FinBERT → up/down/neutral | `processed_data.csv`, `retune_request.json` | `predictions_test.csv` |
 | Evaluator | Sabina | accuracy + per-class metrics | `predictions_test.csv` | `evaluation_report.json` |

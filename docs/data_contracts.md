@@ -118,6 +118,8 @@ The approved proposal Nadi acts on — Sabina's proposal as accepted or overridd
 
 ~300 rows sampled after the loop converges. Freddi generates an Ollama explanation for each; 30–50 are manually scored by the team.
 
+> **Manager also reads `predictions_test.csv`** (Nadi's Handoff 2 output) to source these per-row columns (`predicted_label`, `confidence`, `prob_*`, ground-truth `label`). `evaluation_report.json` carries only aggregate metrics, so the row-level sample is drawn from `predictions_test.csv`.
+
 | Column | Type | Example | Notes |
 |---|---|---|---|
 | article_id | string | FNSPID_00423 | to match back to original data |
