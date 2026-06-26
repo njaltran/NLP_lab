@@ -2,7 +2,7 @@
 
 Agreed input/output formats between all agents. Column names are fixed; !!do not change without telling the whole team!!
 
-**Mock data:** valid sample files for every handoff below live in [`mock_data/`](./mock_data/) (see [`mock_data/README.md`](./mock_data/README.md)) — build and test each agent against them before the upstream agent exists.
+**Mock data:** valid sample files for every handoff below live in [`mock_data/`](../mock_data/) (see [`mock_data/README.md`](../mock_data/README.md)) — build and test each agent against them before the upstream agent exists.
 
 **News source:** FNSPID dataset (`Zihan1004/FNSPID` on HuggingFace), streamed and sampled by target ticker list. Provides `article_title` (headline). Full article body is unavailable in the HuggingFace version — headline is sufficient for FinBERT.
 
@@ -117,6 +117,8 @@ The approved proposal Nadi acts on — Sabina's proposal as accepted or overridd
 **Filename:** `sample_for_explanation.csv`
 
 ~300 rows sampled after the loop converges. Freddi generates an Ollama explanation for each; 30–50 are manually scored by the team.
+
+> **Manager also reads `predictions_test.csv`** (Nadi's Handoff 2 output) to source these per-row columns (`predicted_label`, `confidence`, `prob_*`, ground-truth `label`). `evaluation_report.json` carries only aggregate metrics, so the row-level sample is drawn from `predictions_test.csv`.
 
 | Column | Type | Example | Notes |
 |---|---|---|---|

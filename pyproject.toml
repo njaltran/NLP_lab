@@ -1,10 +1,19 @@
 [project]
-name = "nlp-lab"
+name = "project"
 version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "pandas",
-    "yfinance",
-    "langgraph",
-    "typing_extensions",
+    "huggingface-hub>=1.21.0",
+    "langgraph>=1.2.6",
+    "langgraph-checkpoint-sqlite>=3.1.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]        # import `agents` package from repo root
