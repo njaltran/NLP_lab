@@ -1,0 +1,4 @@
+pandas
+yfinance
+langgraph
+typing_extensions
