@@ -47,21 +47,19 @@ When the real work connects up, it just fits — like puzzle pieces cut to the s
 
 **Don't change the form on your own.** If you rename a column or change what a file looks like without telling the team, you quietly break it for the person who receives your work — they're expecting the old format. If you need a change, say so, we update the contract and the pretend examples together, and everyone adjusts. Changing the agreement is fine; changing it silently is what hurts us.
 
-## How the pieces get switched on (the same "on" button for everyone)
+## How everyone builds their piece the same way (LangGraph)
 
-We agreed each person's piece works the same way from the outside: it has **one button**. You hand it the files it needs, you press the button, and it does its job and saves its own files. You don't need to know what's inside someone else's piece to use it — same as pressing a button on a vending machine without knowing how the machine works.
+We agreed every person builds their piece with the same tool, **LangGraph**.
 
-To make that real, there's one small shared helper file, `agents/base.py`. Think of it as the **standard button** everyone clips onto their piece. Each person wires their own work behind it; from the outside every piece looks the same:
+LangGraph is a tool for building a piece out of small steps with arrows between them — "do this, then this, and if the result looks like X go here, otherwise go there." You draw the steps and the arrows; it runs them in order for you. Aurora's piece, for example, is two steps: *match headlines to prices → label up/down/neutral.* Jack's is a few more, with a fork in the middle (good enough → finish, not good enough → send back to Nadi). Same tool, different steps.
 
-> hand it the files → press the button → it writes its files
-
-So the whole line becomes: press Aurora's button, then Nadi's, then Sabina's, then Jack's — each one leaving its file for the next, exactly like the tickets above.
+Why agree on one tool: each piece then looks the same from the outside. You hand it the files it needs, it runs its steps, and it saves its own files — and you never have to look inside someone else's piece to use yours. The whole line stays exactly like the tickets above: Aurora's piece leaves its file, Nadi's picks it up, and so on.
 
 **Two things to know:**
-- This shared button is **new and not final yet.** Before you build your piece around it, give it a thumbs-up so we're all agreeing to the same thing — same rule as the contract: no surprise changes.
-- The button itself is just *how* a piece is switched on. It does **not** change the files you hand over. Those are still set by `data_contracts.md`, and that's still the thing that must not change silently.
+- To keep the pieces consistent we added one small shared starter file, `agents/base.py`. It's **new and not final yet** — before you build your piece around it, give it a thumbs-up, same rule as the contract: no surprise changes.
+- This is only about *how each piece is built and run*. It does **not** change the files you hand over — those are still set by `data_contracts.md`, and that's still the thing that must not change silently.
 
-Jack's piece (the Manager) already uses it, so there's a working example to copy. Ask him for the pattern when you're ready.
+Jack's piece (the Manager) already works this way, so there's a finished example to copy. Ask him when you're ready.
 
 ## Where to look
 
