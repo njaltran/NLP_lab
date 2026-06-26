@@ -51,6 +51,12 @@ DEFAULT_INPUT = "mock_data/sample_for_explanation.csv"
 DEFAULT_OUTPUT = "explanations.csv"
 DEFAULT_MODEL = "llama3.2"
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
+# Seconds to wait per request. Generous so the FIRST call can survive a cold
+# model load (Ollama loading the model into the GPU after it was unloaded).
+DEFAULT_TIMEOUT = 180.0
+# Ask Ollama to keep the model in memory between rows so it does not unload
+# mid-run and force another slow cold load.
+DEFAULT_KEEP_ALIVE = "15m"
 
 
 def build_prompt(row: dict) -> str:
@@ -83,9 +89,23 @@ def build_prompt(row: dict) -> str:
     )
 
 
-def generate_with_ollama(prompt: str, model: str, base_url: str, timeout: float = 60.0) -> str:
-    """Call the local Ollama HTTP API. Raises urllib.error.URLError if unreachable."""
-    payload = json.dumps({"model": model, "prompt": prompt, "stream": False}).encode("utf-8")
+def generate_with_ollama(
+    prompt: str,
+    model: str,
+    base_url: str,
+    timeout: float = DEFAULT_TIMEOUT,
+    keep_alive: str = DEFAULT_KEEP_ALIVE,
+) -> str:
+    """Call the local Ollama HTTP API. Raises urllib.error.URLError if unreachable.
+
+    `timeout` must be generous enough to cover a cold model load — the first call
+    after the model has been unloaded can take well over a minute. `keep_alive`
+    asks Ollama to keep the model in memory between rows so it does not unload
+    mid-run and trigger another slow cold load.
+    """
+    payload = json.dumps(
+        {"model": model, "prompt": prompt, "stream": False, "keep_alive": keep_alive}
+    ).encode("utf-8")
     req = urllib.request.Request(
         f"{base_url.rstrip('/')}/api/generate",
         data=payload,
@@ -124,7 +144,10 @@ def _clean(text: str) -> str:
     return " ".join(text.split()).strip()
 
 
-def explain_rows(rows: list[dict], model: str, base_url: str, use_ollama: bool) -> list[dict]:
+def explain_rows(
+    rows: list[dict], model: str, base_url: str, use_ollama: bool,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> list[dict]:
     """Generate an explanation per row, returning rows shaped for OUTPUT_COLUMNS."""
     ollama_live = use_ollama  # may flip to False on first failure
     out = []
@@ -132,7 +155,7 @@ def explain_rows(rows: list[dict], model: str, base_url: str, use_ollama: bool) 
         explanation = ""
         if ollama_live:
             try:
-                explanation = generate_with_ollama(build_prompt(row), model, base_url)
+                explanation = generate_with_ollama(build_prompt(row), model, base_url, timeout)
             except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
                 # Ollama not reachable / errored: warn once, switch to fallback.
                 print(
@@ -179,6 +202,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default=DEFAULT_MODEL, help="Ollama model name")
     parser.add_argument("--ollama-url", default=DEFAULT_OLLAMA_URL, help="Ollama base URL")
     parser.add_argument(
+        "--timeout", type=float, default=DEFAULT_TIMEOUT,
+        help="seconds to wait per Ollama request (raise it if cold loads time out)",
+    )
+    parser.add_argument(
         "--no-ollama", action="store_true",
         help="skip Ollama and always use the offline fallback (handy for testing)",
     )
@@ -191,7 +218,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[freddi] read {len(rows)} rows from {args.input}")
 
     out_rows = explain_rows(
-        rows, model=args.model, base_url=args.ollama_url, use_ollama=not args.no_ollama
+        rows, model=args.model, base_url=args.ollama_url,
+        use_ollama=not args.no_ollama, timeout=args.timeout,
     )
     write_output(args.output, out_rows)
     print(f"[freddi] wrote {len(out_rows)} rows to {args.output}")
