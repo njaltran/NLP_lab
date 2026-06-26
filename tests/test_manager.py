@@ -123,6 +123,30 @@ def test_outputs_match_contract(outdir, proceed_report):
     assert rep["manually_scored"] == int(fin.manual_score.notna().sum())
 
 
+# --- public ManagerAgent.run() API ---------------------------------------
+
+def test_manager_agent_run_lifecycle(outdir, tmp_path, proceed_report):
+    """The file-path wrapper drives the same retune→sample→finalize loop, with
+    one instance carrying iteration state across runs via its checkpointer."""
+    retune_path = tmp_path / "eval_retune.json"
+    retune_path.write_text(json.dumps(RETUNE_REPORT))
+    proceed_path = "mock_data/evaluation_report.json"
+    mgr = jm.ManagerAgent(predictions_path=PRED, thread_id="agent")
+
+    r1 = mgr.run(evaluation_report=str(retune_path))
+    assert (r1["iteration"], r1["final_action"]) == (1, "retune")
+    assert (outdir / "retune_request.json").exists()
+
+    r2 = mgr.run(evaluation_report=proceed_path)
+    assert (r2["iteration"], r2["final_action"]) == (2, "proceed")
+    assert (outdir / "sample_for_explanation.csv").exists()
+
+    r3 = mgr.run(evaluation_report=proceed_path, explanations=EXPL)
+    assert r3["iteration"] == 2          # finalize is NOT a new loop iteration
+    assert (outdir / "final_results.csv").exists()
+    assert (outdir / "final_report.json").exists()
+
+
 # --- reproducible sampling ------------------------------------------------
 
 def test_sampling_is_reproducible(outdir):

@@ -13,6 +13,13 @@ import operator
 import os
 from typing import Annotated, TypedDict
 
+# Works both as a package import (`import agents.jack_manager` in tests) and as a
+# direct script (`uv run agents/jack_manager.py`, where `agents/` is on sys.path).
+try:
+    from agents.base import Agent
+except ModuleNotFoundError:
+    from base import Agent
+
 OUTPUT_DIR = "outputs"
 
 
@@ -264,20 +271,54 @@ def build_graph(checkpointer):
     return b.compile(checkpointer=checkpointer)
 
 
+class ManagerAgent(Agent):
+    """Manager (Jack) behind the shared `.run()` interface. Construct once, then
+    feed contract file paths in: pass `evaluation_report` to retune or sample,
+    add `explanations` to finalize. Outputs land in `OUTPUT_DIR` per the contract.
+
+        mgr = ManagerAgent()
+        mgr.run(evaluation_report="outputs/evaluation_report.json")
+        mgr.run(evaluation_report="outputs/evaluation_report.json",
+                explanations="outputs/explanations.csv")
+    """
+
+    def __init__(self, *, target_accuracy=0.60, max_iterations=5,
+                 predictions_path="mock_data/predictions_test.csv",
+                 sample_size=300, checkpointer=None, thread_id="manager"):
+        # Set once and merged into every run's state; the iteration counter and
+        # decision_log accumulate across runs via the checkpointer.
+        self._defaults = {
+            "target_accuracy": target_accuracy,
+            "max_iterations": max_iterations,
+            "predictions_path": predictions_path,
+            "sample_size": sample_size,
+        }
+        super().__init__(checkpointer=checkpointer, thread_id=thread_id)
+
+    def build_graph(self, checkpointer):
+        return build_graph(checkpointer)
+
+    def run(self, evaluation_report: str, explanations: str | None = None) -> dict:
+        """`evaluation_report`: path to Sabina's report JSON. `explanations`:
+        path to Freddi's explanations.csv — present means finalize, absent means
+        retune-or-sample."""
+        with open(evaluation_report, encoding="utf-8") as f:
+            report = json.load(f)
+        state = {**self._defaults, "evaluation_report": report}
+        if explanations is not None:
+            state["explanations_path"] = explanations
+        return self._invoke(state)
+
+
 if __name__ == "__main__":
-    from langgraph.checkpoint.sqlite import SqliteSaver
+    import tempfile
 
-    # Fresh checkpoint each run: the on-disk DB persists across processes, so a
-    # stale "demo" thread would resume the prior run's terminal state and drift
-    # the iteration counter. Remove it so the demo is a self-contained smoke test.
-    if os.path.exists("manager_state.sqlite"):
-        os.remove("manager_state.sqlite")
-        print("Removed prior manager_state.sqlite for a fresh demo run.")
+    # Drive the whole loop through the public ManagerAgent.run() file API. One
+    # instance keeps iteration state across the three runs via its in-memory
+    # checkpointer (no sqlite cleanup needed — fresh process, fresh state).
+    mgr = ManagerAgent(thread_id="demo")
 
-    cfg = {"configurable": {"thread_id": "demo"}}
-    base = {"target_accuracy": 0.60, "max_iterations": 5,
-            "predictions_path": "mock_data/predictions_test.csv"}
-
+    proceed_path = "mock_data/evaluation_report.json"      # ships a proceed report
     retune_report = {
         "accuracy": 0.54, "below_threshold": True,
         "class_accuracy": {"up": 0.60, "down": 0.40, "neutral": 0.30},
@@ -289,16 +330,18 @@ if __name__ == "__main__":
             "suggested_params": {"threshold": 0.5, "max_length": 128},
             "code_notes": "threshold hardcoded at 0.5 in classifier.py"},
     }
-    with open("mock_data/evaluation_report.json") as f:
-        proceed_report = json.load(f)
+    # No retune report ships in mock_data/, so materialise one to a temp file —
+    # the API takes a path, so the demo feeds it a path.
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+        json.dump(retune_report, f)
+        retune_path = f.name
 
-    with SqliteSaver.from_conn_string("manager_state.sqlite") as cp:
-        graph = build_graph(cp)
-        r1 = graph.invoke({**base, "evaluation_report": retune_report}, cfg)
-        print(f"R1 → it={r1['iteration']} action={r1['final_action']:7s} → retune branch")
-        r2 = graph.invoke({**base, "evaluation_report": proceed_report}, cfg)
-        print(f"R2 → it={r2['iteration']} action={r2['final_action']:7s} → sample branch")
-        r3 = graph.invoke({**base, "evaluation_report": proceed_report,
-                           "explanations_path": "mock_data/explanations.csv"}, cfg)
-        print(f"R3 → it={r3['iteration']} action={r3['final_action']:7s} → finalize branch")
+    r1 = mgr.run(evaluation_report=retune_path)
+    print(f"R1 → it={r1['iteration']} action={r1['final_action']:7s} → retune branch")
+    r2 = mgr.run(evaluation_report=proceed_path)
+    print(f"R2 → it={r2['iteration']} action={r2['final_action']:7s} → sample branch")
+    r3 = mgr.run(evaluation_report=proceed_path, explanations="mock_data/explanations.csv")
+    print(f"R3 → it={r3['iteration']} action={r3['final_action']:7s} → finalize branch")
+
+    os.remove(retune_path)
     print("\noutputs/ now holds:", sorted(os.listdir(OUTPUT_DIR)))
