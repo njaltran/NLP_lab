@@ -47,6 +47,20 @@ When the real work connects up, it just fits — like puzzle pieces cut to the s
 
 **Don't change the form on your own.** If you rename a column or change what a file looks like without telling the team, you quietly break it for the person who receives your work — they're expecting the old format. If you need a change, say so, we update the contract and the pretend examples together, and everyone adjusts. Changing the agreement is fine; changing it silently is what hurts us.
 
+## How everyone builds their piece the same way (LangGraph)
+
+We agreed every person builds their piece with the same tool, **LangGraph**.
+
+LangGraph is a tool for building a piece out of small steps with arrows between them — "do this, then this, and if the result looks like X go here, otherwise go there." You draw the steps and the arrows; it runs them in order for you. Aurora's piece, for example, is two steps: *match headlines to prices → label up/down/neutral.* Jack's is a few more, with a fork in the middle (good enough → finish, not good enough → send back to Nadi). Same tool, different steps.
+
+Why agree on one tool: each piece then looks the same from the outside. You hand it the files it needs, it runs its steps, and it saves its own files — and you never have to look inside someone else's piece to use yours. The whole line stays exactly like the tickets above: Aurora's piece leaves its file, Nadi's picks it up, and so on.
+
+**Two things to know:**
+- To keep the pieces consistent we added one small shared starter file, `agents/base.py`. It's **new and not final yet** — before you build your piece around it, give it a thumbs-up, same rule as the contract: no surprise changes.
+- This is only about *how each piece is built and run*. It does **not** change the files you hand over — those are still set by `data_contracts.md`, and that's still the thing that must not change silently.
+
+Jack's piece (the Manager) already works this way, so there's a finished example to copy. Ask him when you're ready.
+
 ## Where to look
 
 - **[`data_contracts.md`](./data_contracts.md)** — the exact format of every handoff.
