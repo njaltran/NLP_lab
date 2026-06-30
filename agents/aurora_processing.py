@@ -1,14 +1,14 @@
 """
-Processing Agent — LangGraph node
+Processing Agent
 Owner: Aurora Ruci
 
-Reads fnspid_raw.csv, fetches closing prices via yfinance, assigns
-price-movement labels, and writes processed_data.csv.
+Reads data/fnspid_raw.csv, fetches closing prices via yfinance, assigns
+price-movement labels, and writes data/processed_data.csv.
 
 Exports
 -------
-processing_node   callable node for Jack's full pipeline graph
-test_graph        standalone graph (START → processing → END) for local testing
+ProcessingAgent   Agent subclass — callers do ProcessingAgent().run()
+processing_node   raw LangGraph node used inside ProcessingAgent.build_graph
 
 Usage (standalone test):
     python agents/aurora_processing.py --threshold 0.01
@@ -16,7 +16,6 @@ Usage (standalone test):
 
 import os
 import pickle
-
 import sys
 import pandas as pd
 import yfinance as yf
@@ -25,10 +24,11 @@ from langgraph.graph import StateGraph, START, END
 # Allow running as `python agents/aurora_processing.py` from the repo root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agents.state import PipelineState
+from agents.base import Agent
 
 
 # ---------------------------------------------------------------------------
-# Helpers (same logic as processing_agent.py)
+# Helpers
 # ---------------------------------------------------------------------------
 
 def _fetch_price_cache(tickers, date_min, date_max):
@@ -80,9 +80,8 @@ def processing_node(state: PipelineState) -> dict:
     output file path as `processed_data_path` in the state."""
 
     threshold = state.get("threshold", 0.01)
-    data_dir  = state.get("data_dir") or os.path.dirname(
-                    os.path.dirname(os.path.abspath(__file__))
-                )
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_dir  = state.get("data_dir") or os.path.join(repo_root, "data")
 
     raw_path   = os.path.join(data_dir, "fnspid_raw.csv")
     cache_path = os.path.join(data_dir, "price_cache.pkl")
@@ -92,7 +91,7 @@ def processing_node(state: PipelineState) -> dict:
     if not os.path.exists(raw_path):
         raise FileNotFoundError(
             f"fnspid_raw.csv not found in {data_dir}. "
-            "Run Section 1 of processing_agent_logic.ipynb first."
+            "Make sure data/fnspid_raw.csv exists in the repo."
         )
     print("[processing] Loading raw data ...")
     df = pd.read_csv(raw_path)
@@ -135,19 +134,20 @@ def processing_node(state: PipelineState) -> dict:
     df = df.dropna(subset=["label"]).reset_index(drop=True)
     print(f"  Dropped {before - len(df):,} rows with no price data. Final: {len(df):,} rows")
 
-    # 5. Flag outliers (IQR 1.5×)
+    # 5. Drop outliers (IQR 1.5×)
     q1, q3 = df["pct_change"].quantile(0.25), df["pct_change"].quantile(0.75)
     iqr = q3 - q1
-    df["is_outlier"] = (
-        (df["pct_change"] < q1 - 1.5 * iqr) |
-        (df["pct_change"] > q3 + 1.5 * iqr)
-    )
-    print(f"  Outliers flagged: {df['is_outlier'].sum():,} ({df['is_outlier'].mean()*100:.1f}%)")
+    before_outliers = len(df)
+    df = df[
+        (df["pct_change"] >= q1 - 1.5 * iqr) &
+        (df["pct_change"] <= q3 + 1.5 * iqr)
+    ].reset_index(drop=True)
+    print(f"  Outliers dropped: {before_outliers - len(df):,}. Final: {len(df):,} rows")
 
     # 6. Export (Handoff 1 schema from data_contracts.md)
     output_cols = [
         "article_id", "date", "ticker", "article_title",
-        "price_t", "price_t1", "pct_change", "label", "is_outlier",
+        "price_t", "price_t1", "pct_change", "label",
     ]
     df[output_cols].to_csv(out_path, index=False)
     print(f"[processing] Written to {out_path}")
@@ -159,19 +159,23 @@ def processing_node(state: PipelineState) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Standalone test graph (Aurora only — START → processing → END)
+# Agent class
 # ---------------------------------------------------------------------------
 
-_builder = StateGraph(PipelineState)
-_builder.add_node("processing", processing_node)
-_builder.add_edge(START, "processing")
-_builder.add_edge("processing", END)
+class ProcessingAgent(Agent):
+    def build_graph(self, checkpointer):
+        builder = StateGraph(PipelineState)
+        builder.add_node("processing", processing_node)
+        builder.add_edge(START, "processing")
+        builder.add_edge("processing", END)
+        return builder.compile(checkpointer=checkpointer)
 
-test_graph = _builder.compile()
+    def run(self, **inputs) -> dict:
+        return self._invoke(inputs)
 
 
 # ---------------------------------------------------------------------------
-# CLI
+# CLI — builds agent only when run directly
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
@@ -183,11 +187,12 @@ if __name__ == "__main__":
     parser.add_argument("--threshold", type=float, default=0.01,
                         help="Price-change threshold in decimal form (default: 0.01 = ±1%%)")
     parser.add_argument("--data-dir", type=str, default=None,
-                        help="Repo root directory (default: auto-detected)")
+                        help="Data directory containing fnspid_raw.csv (default: data/)")
     args = parser.parse_args()
 
-    final_state = test_graph.invoke({
-        "threshold": args.threshold,
-        "data_dir":  args.data_dir,
-    })
+    agent = ProcessingAgent()
+    final_state = agent.run(
+        threshold=args.threshold,
+        data_dir=args.data_dir,
+    )
     print("\nOutput file:", final_state["processed_data_path"])

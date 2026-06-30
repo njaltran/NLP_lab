@@ -1,0 +1,16 @@
+[project]
+name = "project"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "huggingface-hub>=1.21.0",
+    "langgraph>=1.2.6",
+    "langgraph-checkpoint-sqlite>=3.1.0",
+    "pandas>=2.0.0",
+    "yfinance>=0.2.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
