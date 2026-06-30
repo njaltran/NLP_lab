@@ -118,7 +118,7 @@ def generate_code(state: PipelineState) -> dict:
 
     # Read from retune request if it exists in state
     retune_req = state.get("retune_request")
-    if retune_req:
+    if retune_req and isinstance(retune_req, dict):
         suggested = retune_req.get("suggested_params", {})
         threshold = suggested.get("threshold", threshold)
         max_length = suggested.get("max_length", max_length)
@@ -205,12 +205,23 @@ class ClassifierAgent(Agent):
             "classifier_code_path": os.path.abspath(classifier_code),
             "predictions_path": os.path.abspath(predictions),
         }
-        if retune_request is not None and os.path.exists(retune_request):
-            try:
-                with open(retune_request, "r", encoding="utf-8") as f:
-                    state["retune_request"] = json.load(f)
-            except Exception as e:
-                print(f"[nadi] Warning: Failed to parse retune_request file: {e}")
+        if retune_request is not None:
+            if not os.path.exists(retune_request):
+                print(
+                    f"[nadi] WARNING: retune_request file path was provided but the file does not exist: {retune_request}",
+                    file=sys.stderr
+                )
+                state["retune_request"] = "no retune applied"
+            else:
+                try:
+                    with open(retune_request, "r", encoding="utf-8") as f:
+                        state["retune_request"] = json.load(f)
+                except Exception as e:
+                    print(
+                        f"[nadi] ERROR: Failed to parse retune_request file {retune_request}: {e}",
+                        file=sys.stderr
+                    )
+                    raise e
             
         return self._invoke(state)
 
