@@ -227,3 +227,6 @@ plots/
 # Generated artifacts — reproducible by running the agents, not tracked
 data/price_cache.pkl
 data/processed_data.csv
+
+# Stray raw API dumps — not part of the repo
+download*.json
