@@ -48,12 +48,15 @@ def _(json, os, pd):
         path = os.path.join(DATA_DIR, name)
         return pd.read_csv(path) if os.path.exists(path) else pd.DataFrame()
 
+    # final_report.json is deliberately NOT read: it can lag the latest run
+    # (stale convergence numbers). Every headline figure below is computed from
+    # predictions_test.csv (the ground truth) or read from the per-run files
+    # the Manager rewrites each iteration (evaluation_report / decision).
     preds = _load_csv("predictions_test.csv")
     explanations = _load_csv("explanations.csv")
     evaluation = _load_json("evaluation_report.json")
-    final_report = _load_json("final_report.json")
     decision = _load_json("decision.json")
-    return DATA_DIR, evaluation, explanations, final_report, preds
+    return DATA_DIR, decision, evaluation, explanations, preds
 
 
 @app.cell
@@ -68,10 +71,14 @@ def _(DATA_DIR, mo):
 
 
 @app.cell
-def _(evaluation, final_report, mo, preds):
-    # --- KPI row ---
-    accuracy = final_report.get("final_accuracy", evaluation.get("accuracy", 0.0))
-    iterations = final_report.get("loop_iterations", "—")
+def _(decision, evaluation, mo, preds):
+    # --- KPI row --- all figures derived from the live run, never final_report.
+    # Accuracy is computed straight from the predictions so it can never drift
+    # from the table/slider below.
+    accuracy = (
+        (preds["label"] == preds["predicted_label"]).mean() if not preds.empty else 0.0
+    )
+    iterations = decision.get("iteration", "—")  # Manager rewrites this each pass
     below = evaluation.get("below_threshold")
     gate = "✅ cleared" if below is False else ("⚠️ below target" if below else "—")
 
