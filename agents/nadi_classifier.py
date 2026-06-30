@@ -40,8 +40,12 @@ THRESHOLD = {threshold}
 FOCUS_LABELS = {focus_labels}
 SENTIMENT_TO_LABEL = {{"positive": "up", "negative": "down", "neutral": "neutral"}}
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL)
-model = AutoModelForSequenceClassification.from_pretrained(MODEL)
+# Authenticate to the HF Hub when a token is in the env (higher rate limits,
+# faster downloads); fall back to unauthenticated access when it is absent.
+HF_TOKEN = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL, token=HF_TOKEN)
+model = AutoModelForSequenceClassification.from_pretrained(MODEL, token=HF_TOKEN)
 model.eval()
 
 ID2OURS = {{i: SENTIMENT_TO_LABEL[model.config.id2label[i].lower()] for i in model.config.id2label}}
