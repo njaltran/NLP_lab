@@ -56,7 +56,14 @@ def _(json, os, pd):
     explanations = _load_csv("explanations.csv")
     evaluation = _load_json("evaluation_report.json")
     decision = _load_json("decision.json")
-    return DATA_DIR, decision, evaluation, explanations, preds
+
+    # Compute the correctness flag once so every chart, KPI and filter shares the
+    # same definition (no per-cell `label == predicted_label`).
+    if not preds.empty:
+        preds["correct"] = preds["label"] == preds["predicted_label"]
+
+    LABELS = ["up", "down", "neutral"]  # canonical order, reused by chart + dropdown
+    return DATA_DIR, LABELS, decision, evaluation, explanations, preds
 
 
 @app.cell
@@ -75,9 +82,7 @@ def _(decision, evaluation, mo, preds):
     # --- KPI row --- all figures derived from the live run, never final_report.
     # Accuracy is computed straight from the predictions so it can never drift
     # from the table/slider below.
-    accuracy = (
-        (preds["label"] == preds["predicted_label"]).mean() if not preds.empty else 0.0
-    )
+    accuracy = preds["correct"].mean() if not preds.empty else 0.0
     iterations = decision.get("iteration", "—")  # Manager rewrites this each pass
     below = evaluation.get("below_threshold")
     gate = "✅ cleared" if below is False else ("⚠️ below target" if below else "—")
@@ -97,18 +102,15 @@ def _(decision, evaluation, mo, preds):
 
 
 @app.cell
-def _(alt, mo, preds):
+def _(LABELS, alt, mo, preds):
     # --- Confusion matrix: actual (label) vs predicted_label ---
-    labels = ["up", "down", "neutral"]
-    cm = (
-        preds.groupby(["label", "predicted_label"]).size().reset_index(name="count")
-    )
+    cm = preds.groupby(["label", "predicted_label"]).size().reset_index(name="count")
     confusion = (
         alt.Chart(cm)
         .mark_rect()
         .encode(
-            x=alt.X("predicted_label:N", sort=labels, title="Predicted"),
-            y=alt.Y("label:N", sort=labels, title="Actual"),
+            x=alt.X("predicted_label:N", sort=LABELS, title="Predicted"),
+            y=alt.Y("label:N", sort=LABELS, title="Actual"),
             color=alt.Color("count:Q", scale=alt.Scale(scheme="blues")),
             tooltip=["label", "predicted_label", "count"],
         )
@@ -132,9 +134,8 @@ def _(alt, mo, preds):
     if preds.empty:
         conf_hist = mo.md("_no predictions_")
     else:
-        d = preds.assign(correct=preds["label"] == preds["predicted_label"])
         conf_hist = mo.ui.altair_chart(
-            alt.Chart(d)
+            alt.Chart(preds)
             .mark_bar(opacity=0.7)
             .encode(
                 x=alt.X("confidence:Q", bin=alt.Bin(maxbins=20), title="Confidence"),
@@ -158,12 +159,7 @@ def _(alt, mo, preds):
     if preds.empty:
         ticker_chart = mo.md("_no predictions_")
     else:
-        per = (
-            preds.assign(correct=(preds["label"] == preds["predicted_label"]).astype(int))
-            .groupby("ticker")["correct"]
-            .mean()
-            .reset_index(name="accuracy")
-        )
+        per = preds.groupby("ticker")["correct"].mean().reset_index(name="accuracy")
         ticker_chart = mo.ui.altair_chart(
             alt.Chart(per)
             .mark_bar()
@@ -198,7 +194,7 @@ def _(accuracy, conf_threshold, mo, preds):
     else:
         kept = preds[preds["confidence"] >= conf_threshold.value]
         if len(kept):
-            acc = (kept["label"] == kept["predicted_label"]).mean()
+            acc = kept["correct"].mean()
             coverage = len(kept) / len(preds)
             thresh_view = mo.hstack(
                 [
@@ -215,21 +211,14 @@ def _(accuracy, conf_threshold, mo, preds):
 
 
 @app.cell
-def _(mo, preds):
+def _(LABELS, mo, preds):
     # --- Widgets driving the predictions table ---
-    if preds.empty:
-        ticker_filter = mo.ui.multiselect(options=[], label="Tickers")
-        label_filter = mo.ui.dropdown(options=["all"], value="all", label="Predicted label")
-        only_wrong = mo.ui.switch(value=False, label="Only misclassified")
-    else:
-        ticker_filter = mo.ui.multiselect(
-            options=sorted(preds["ticker"].unique().tolist()),
-            label="Tickers (empty = all)",
-        )
-        label_filter = mo.ui.dropdown(
-            options=["all", "up", "down", "neutral"], value="all", label="Predicted label"
-        )
-        only_wrong = mo.ui.switch(value=False, label="Only misclassified")
+    tickers = sorted(preds["ticker"].unique().tolist()) if not preds.empty else []
+    ticker_filter = mo.ui.multiselect(options=tickers, label="Tickers (empty = all)")
+    label_filter = mo.ui.dropdown(
+        options=["all", *LABELS], value="all", label="Predicted label"
+    )
+    only_wrong = mo.ui.switch(value=False, label="Only misclassified")
 
     controls = mo.vstack(
         [
@@ -253,7 +242,7 @@ def _(label_filter, mo, only_wrong, preds, ticker_filter):
         if label_filter.value != "all":
             view = view[view["predicted_label"] == label_filter.value]
         if only_wrong.value:
-            view = view[view["label"] != view["predicted_label"]]
+            view = view[~view["correct"]]
         preds_table = mo.vstack(
             [
                 mo.md(f"_{len(view)} of {len(preds)} rows_"),
@@ -293,7 +282,7 @@ def _(mo):
 
 
 @app.cell
-def _(DATA_DIR, mo, os, pd):
+def _(DATA_DIR, json, mo, os, pd):
     # Stream the Manager graph and capture each node's state update. Read-only
     # re-run against the current report — writes go to outputs/ exactly as a
     # normal run would, so guard on the report existing.
@@ -303,30 +292,28 @@ def _(DATA_DIR, mo, os, pd):
         graph_trace = pd.DataFrame()
         final_state = {}
     else:
-        import json as _json
-
         from agents.jack_manager import ManagerAgent
 
         with open(report_path, encoding="utf-8") as f:
-            _report = _json.load(f)
+            report = json.load(f)
 
         mgr = ManagerAgent(thread_id="dashboard")
-        init = {**mgr._defaults, "evaluation_report": _report}
+        init_state = {**mgr._defaults, "evaluation_report": report}
 
-        rows = []
-        for event in mgr._graph.stream(init, mgr._config):
-            for node, update in event.items():
-                rows.append(
-                    {
-                        "node": node,
-                        "keys_updated": ", ".join(update.keys()),
-                        "final_action": update.get("final_action", ""),
-                        "decision": update.get("decision", ""),
-                        "iteration": update.get("iteration", ""),
-                        "notes": update.get("notes", ""),
-                    }
-                )
-        graph_trace = pd.DataFrame(rows)
+        # One row per node firing: which keys it set and the headline values.
+        trace_rows = [
+            {
+                "node": node,
+                "keys_updated": ", ".join(update.keys()),
+                "final_action": update.get("final_action", ""),
+                "decision": update.get("decision", ""),
+                "iteration": update.get("iteration", ""),
+                "notes": update.get("notes", ""),
+            }
+            for event in mgr._graph.stream(init_state, mgr._config)
+            for node, update in event.items()
+        ]
+        graph_trace = pd.DataFrame(trace_rows)
         final_state = mgr._graph.get_state(mgr._config).values
 
     mo.ui.table(graph_trace, selection=None, label="node-by-node trace") if not graph_trace.empty else mo.md("_no evaluation_report to stream_")
