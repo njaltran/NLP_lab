@@ -22,3 +22,5 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]        # import `agents` package from repo root
+    "pytest",
+]
