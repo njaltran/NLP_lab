@@ -12,7 +12,7 @@ Agreed input/output formats between all agents. Column names are fixed; !!do not
 
 **Filename:** `processed_data.csv`
 
-Built by joining FNSPID headlines to yfinance prices on `ticker` + publication date. For each article: `price_t` = closing price on publication day, `price_t1` = closing price on the next trading day, `pct_change` = percentage change, `label` = up / down / neutral (threshold ±1%). Articles with no matching price data are dropped.
+Built by joining FNSPID headlines to yfinance prices on `ticker` + publication date. For each article: `price_t` = closing price on publication day, `price_t1` = closing price on the next trading day, `pct_change` = percentage change, `label` = up / down / neutral (threshold ±1%). Two filtering steps are applied: (1) articles with no matching price data are dropped; (2) rows where `pct_change` falls outside the 1st–99th percentile are dropped (~2% of rows) to remove extreme price moves that are not explained by the headline text.
 
 | Column | Type | Example | Notes |
 |---|---|---|---|
