@@ -41,8 +41,18 @@ class ManagerState(TypedDict):
     overrides: dict              # fields Jack changed; {} if accept
     notes: str                   # rationale (filled by the LLM node, step 5)
 
-    # --- running history (reducer field → appended every iteration) ---
-    decision_log: Annotated[list, operator.add]
+    # --- convergence config (set once at start; see `decide`) ---
+    patience: int                # how many recent iterations to watch for progress
+    min_delta: float             # smallest accuracy gain that counts as "progress"
+
+    # --- running history (reducer fields → APPENDED every iteration) ------------
+    # A reducer field is merged with `operator.add` (list concatenation) instead of
+    # being overwritten, so each node returns a *one-element list* and LangGraph
+    # appends it. This is how the Manager remembers what happened in earlier
+    # iterations — the raw material for the convergence and adaptation decisions.
+    decision_log: Annotated[list, operator.add]      # human-readable note per step
+    accuracy_history: Annotated[list, operator.add]  # one accuracy per iteration
+    tried_params: Annotated[list, operator.add]      # retune params used per retune
 
     # --- I/O config (paths to contract files; optional, read via .get) ---
     predictions_path: str        # Nadi's predictions_test.csv (to sample / finalize)
@@ -69,22 +79,74 @@ def _write_decision(state: "ManagerState") -> None:
     })
 
 
+# Ordered escalation schedule for the retune loop. The first retune re-uses
+# Sabina's proposed params as-is; every retune AFTER that walks down this list
+# (skipping anything already tried) so each attempt is genuinely different rather
+# than a repeat. The levers: lower `threshold` so fewer rows get forced to the
+# `neutral` fallback class, and widen `max_length` so longer headlines aren't
+# truncated. Tune these values here — nothing downstream is hardcoded to them.
+_RETUNE_SCHEDULE = [
+    {"threshold": 0.45, "max_length": 128},
+    {"threshold": 0.40, "max_length": 192},
+    {"threshold": 0.35, "max_length": 256},
+    {"threshold": 0.30, "max_length": 256},
+]
+
+
+def _next_params(tried: list) -> dict:
+    """Pick the next retune params: the first schedule entry not already tried,
+    or the last entry once the schedule is exhausted (the iteration cap still
+    bounds the loop, so returning a repeat here is safe)."""
+    for params in _RETUNE_SCHEDULE:
+        if params not in tried:
+            return params
+    return _RETUNE_SCHEDULE[-1]
+
+
+def _converged(history: list, patience: int, min_delta: float) -> bool:
+    """True when retuning has stopped paying off, so we should proceed instead of
+    burning the rest of the iteration budget.
+
+    Rule: once we have more than `patience` accuracies, compare the best of the
+    last `patience` iterations against the best of everything before them. If the
+    recent window failed to beat the earlier best by at least `min_delta`, the
+    loop has plateaued. `history` includes the current iteration's accuracy.
+    """
+    if len(history) <= patience:
+        return False  # not enough history yet — let the loop keep exploring
+    recent_best = max(history[-patience:])
+    earlier_best = max(history[:-patience])
+    return recent_best - earlier_best < min_delta
+
+
 def decide(state: ManagerState) -> dict:
-    """Threshold gate (deterministic). Returns only the keys it changed."""
+    """Threshold gate (deterministic). Decides retune vs. proceed, and when
+    retuning, chooses the next hyperparameters from history. Returns only the
+    keys it changed (LangGraph merges them into the running state).
+    """
     report = state["evaluation_report"]
     accuracy = report["accuracy"]
-    # count retune cycles only: once we've proceeded, the finalize pass is not
-    # a new iteration, so don't bump the counter past convergence.
+    # Count retune cycles only: once we've proceeded, the finalize pass is not a
+    # new iteration, so don't bump the counter past convergence.
     iteration = state.get("iteration", 0)
     if state.get("final_action") != "proceed":
         iteration += 1
 
-    cleared = accuracy >= state["target_accuracy"]
-    cap_hit = iteration >= state["max_iterations"]
-    final_action = "proceed" if (cleared or cap_hit) else "retune"
+    # Full accuracy trend INCLUDING this iteration — the input to convergence.
+    history = state.get("accuracy_history", []) + [accuracy]
+    patience = state.get("patience", 2)
+    min_delta = state.get("min_delta", 0.01)
+
+    # Three independent reasons to stop retuning and move on.
+    cleared = accuracy >= state["target_accuracy"]       # good enough
+    cap_hit = iteration >= state["max_iterations"]        # out of budget
+    converged = _converged(history, patience, min_delta)  # progress has stalled
+    final_action = "proceed" if (cleared or cap_hit or converged) else "retune"
 
     if cleared:
         why = "cleared target"
+    elif converged:
+        why = "converged (no improvement), proceeding"
     elif cap_hit:
         why = "cap hit, forcing proceed"
     else:
@@ -92,23 +154,40 @@ def decide(state: ManagerState) -> dict:
     note = (f"iteration {iteration}: accuracy {accuracy:.2f} vs target "
             f"{state['target_accuracy']:.2f} — {why}")
 
-    # Override = the gate's action disagrees with Sabina's recommendation
-    # (e.g. she says retune but the cap forces proceed). Else accept.
-    recommended = report.get("proposal", {}).get("recommended_action")
-    if recommended is not None and recommended != final_action:
-        decision, overrides = "override", {"final_action": final_action}
-    else:
-        decision, overrides = "accept", {}
-
-    return {
-        "iteration": iteration,     # saved → next invocation resumes from here
+    out = {
+        "iteration": iteration,          # saved → next invocation resumes from here
         "accuracy": accuracy,
         "final_action": final_action,
-        "decision": decision,
-        "overrides": overrides,
-        "notes": note,              # plain field → overwrites
-        "decision_log": [note],     # reducer field → appended
+        "notes": note,                   # plain field → overwrites
+        "decision_log": [note],          # reducer field → appended
+        "accuracy_history": [accuracy],  # reducer field → appended
     }
+
+    if final_action == "retune":
+        # First retune trusts Sabina's proposal as-is (accept); every retune after
+        # that adapts the params (override), because a repeat proposal has already
+        # failed once. `tried_params` records what we actually used either way.
+        proposal = report.get("proposal", {})
+        tried = state.get("tried_params", [])
+        if not tried:
+            used = proposal.get("suggested_params", {})
+            out["decision"], out["overrides"] = "accept", {}
+        else:
+            used = _next_params(tried)
+            out["decision"] = "override"
+            out["overrides"] = {"suggested_params": used,
+                                "focus_labels": proposal.get("focus_labels", [])}
+        out["tried_params"] = [used]
+    else:
+        # Proceeding. Override only when the gate overrules Sabina's recommendation
+        # (e.g. she says retune but the cap/convergence forces proceed); else accept.
+        recommended = report.get("proposal", {}).get("recommended_action")
+        if recommended is not None and recommended != final_action:
+            out["decision"], out["overrides"] = "override", {"final_action": final_action}
+        else:
+            out["decision"], out["overrides"] = "accept", {}
+
+    return out
 
 
 def route_after_decide(state: ManagerState) -> str:
@@ -283,13 +362,18 @@ class ManagerAgent(Agent):
     """
 
     def __init__(self, *, target_accuracy=0.60, max_iterations=5,
+                 patience=2, min_delta=0.01,
                  predictions_path="mock_data/predictions_test.csv",
                  sample_size=300, checkpointer=None, thread_id="manager"):
         # Set once and merged into every run's state; the iteration counter and
-        # decision_log accumulate across runs via the checkpointer.
+        # the history reducers accumulate across runs via the checkpointer.
+        # `patience`/`min_delta` tune early-stopping: proceed once accuracy hasn't
+        # gained `min_delta` over the best of the last `patience` iterations.
         self._defaults = {
             "target_accuracy": target_accuracy,
             "max_iterations": max_iterations,
+            "patience": patience,
+            "min_delta": min_delta,
             "predictions_path": predictions_path,
             "sample_size": sample_size,
         }
