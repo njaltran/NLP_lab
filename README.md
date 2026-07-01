@@ -30,9 +30,15 @@ flowchart TD
 ```
 
 **Loop:** the Manager gates on accuracy. Below the 0.60 target it writes a
-`retune_request.json` and sends Nadi back around; once the target clears (or the
-5-iteration cap forces it), it samples rows for Freddi, then joins the
-explanations into the final outputs.
+`retune_request.json` and sends Nadi back around; once the target clears, the
+accuracy plateaus (convergence early-stop), or the 5-iteration cap forces it, it
+samples rows for Freddi, then joins the explanations into the final outputs. Each
+retune escalates the classifier's hyperparameters instead of repeating, so the
+loop actually explores rather than spinning.
+
+The whole thing is one compiled **LangGraph** (`agents/pipeline_graph.py`) whose
+retune loop is a real graph *cycle* (`gate → classify → evaluate → gate`), not a
+Python loop. `main.py` just loads secrets, parses flags, and invokes the graph.
 
 ## Setup & run
 
