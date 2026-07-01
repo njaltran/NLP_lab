@@ -86,7 +86,38 @@ def test_low_accuracy_recommends_retune():
     assert report["accuracy"] < 0.60
     assert report["below_threshold"] is True
     assert report["proposal"]["recommended_action"] == "retune"
-    assert report["proposal"]["suggested_params"] == {"threshold": 0.5, "max_length": 128}
+    # Sabina steps the threshold down from the classifier's current value each
+    # retune so the next pass predicts differently (0.5 - 0.05 = 0.45).
+    assert report["proposal"]["suggested_params"] == {"threshold": 0.45, "max_length": 128}
+
+
+def test_retune_threshold_steps_down_from_current():
+    """Each retune reads the classifier's current THRESHOLD and lowers it by one
+    step, so the loop explores instead of re-running identical params."""
+    rows = _load_mock_rows()
+    for row in rows:
+        row["predicted_label"] = "neutral"
+        row["confidence"] = "0.90"
+        row["prob_up"] = "0.05"
+        row["prob_down"] = "0.05"
+        row["prob_neutral"] = "0.90"
+
+    report = se.build_report(rows, "THRESHOLD = 0.45\nMAX_LENGTH = 128\n")
+    assert report["proposal"]["suggested_params"]["threshold"] == 0.4
+
+
+def test_retune_threshold_floors():
+    """The step-down stops at the floor so it never proposes a degenerate gate."""
+    rows = _load_mock_rows()
+    for row in rows:
+        row["predicted_label"] = "neutral"
+        row["confidence"] = "0.90"
+        row["prob_up"] = "0.05"
+        row["prob_down"] = "0.05"
+        row["prob_neutral"] = "0.90"
+
+    report = se.build_report(rows, "THRESHOLD = 0.35\nMAX_LENGTH = 128\n")
+    assert report["proposal"]["suggested_params"]["threshold"] == 0.35
 
 
 def test_validation_rejects_non_test_rows():
