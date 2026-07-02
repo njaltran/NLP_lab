@@ -92,6 +92,36 @@ def test_low_accuracy_recommends_retune():
     }
 
 
+def test_retune_threshold_steps_down_from_current():
+    """Each retune should lower the classifier threshold by one deterministic step."""
+    rows = _load_mock_rows()
+    for row in rows:
+        row["predicted_label"] = "neutral"
+        row["confidence"] = "0.90"
+        row["prob_up"] = "0.05"
+        row["prob_down"] = "0.05"
+        row["prob_neutral"] = "0.90"
+
+    report = se.build_report(rows, "THRESHOLD = 0.45\nMAX_LENGTH = 128\n")
+
+    assert report["proposal"]["suggested_params"]["threshold"] == 0.40
+
+
+def test_retune_threshold_floors():
+    """The threshold step-down should stop at the manager-aligned floor."""
+    rows = _load_mock_rows()
+    for row in rows:
+        row["predicted_label"] = "neutral"
+        row["confidence"] = "0.90"
+        row["prob_up"] = "0.05"
+        row["prob_down"] = "0.05"
+        row["prob_neutral"] = "0.90"
+
+    report = se.build_report(rows, "THRESHOLD = 0.20\nMAX_LENGTH = 128\n")
+
+    assert report["proposal"]["suggested_params"]["threshold"] == 0.20
+
+
 def test_focus_labels_include_near_weakest_classes():
     """The proposal should focus all labels within FOCUS_MARGIN of the weakest."""
     assert se._weakest_labels({"up": 0.30, "down": 0.28, "neutral": 0.45}) == [
