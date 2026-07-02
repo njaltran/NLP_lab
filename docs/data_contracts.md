@@ -35,6 +35,8 @@ Nadi is a code-generation agent: it **generates the classifier as a Python scrip
 
 The Python Nadi generated to produce the predictions. Sabina reads it to ground her proposal (e.g. spotting a hardcoded threshold or `max_length`). Must run standalone with `processed_data.csv` as input and write `predictions_test.csv`.
 
+Overwritten every retune, so Nadi also archives each iteration's code to `classifier_history/classifier_iter{N}.py` (`N` = the retune's `iteration`, `0` for the first pass before any retune). Audit trail only — nothing downstream reads it.
+
 ### `predictions_test.csv`
 
 Nadi receives `processed_data.csv` from Aurora and adds the prediction columns. The file passed to Sabina contains all of the following:
