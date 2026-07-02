@@ -87,15 +87,17 @@ def _write_decision(state: "ManagerState") -> None:
 # Sabina's proposed params as-is; every retune AFTER that walks down this list
 # (skipping anything already tried) so each attempt is genuinely different rather
 # than a repeat. The levers: lower `threshold` so fewer rows get forced to the
-# `neutral` fallback class, and widen `max_length` so longer headlines aren't
-# truncated. Tune these values here — nothing downstream is hardcoded to them.
+# `neutral` fallback class, widen `max_length` so longer headlines aren't
+# truncated, and raise `boost_factor` so Nadi's focus-label boost (applied to
+# whatever Sabina flagged as weakest) has more effect each retune. Tune these
+# values here — nothing downstream is hardcoded to them.
 _RETUNE_SCHEDULE = [
-    {"threshold": 0.45, "max_length": 128},
-    {"threshold": 0.40, "max_length": 160},
-    {"threshold": 0.35, "max_length": 192},
-    {"threshold": 0.30, "max_length": 224},
-    {"threshold": 0.25, "max_length": 256},
-    {"threshold": 0.20, "max_length": 256},
+    {"threshold": 0.45, "max_length": 128, "boost_factor": 1.25},
+    {"threshold": 0.40, "max_length": 160, "boost_factor": 1.35},
+    {"threshold": 0.35, "max_length": 192, "boost_factor": 1.45},
+    {"threshold": 0.30, "max_length": 224, "boost_factor": 1.55},
+    {"threshold": 0.25, "max_length": 256, "boost_factor": 1.65},
+    {"threshold": 0.20, "max_length": 256, "boost_factor": 1.75},
 ]
 
 

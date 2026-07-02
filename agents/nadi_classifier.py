@@ -38,6 +38,7 @@ MODEL = "ProsusAI/finbert"
 MAX_LENGTH = {max_length}
 THRESHOLD = {threshold}
 FOCUS_LABELS = {focus_labels}
+BOOST_FACTOR = {boost_factor}
 SENTIMENT_TO_LABEL = {{"positive": "up", "negative": "down", "neutral": "neutral"}}
 
 # Authenticate to the HF Hub when a token is in the env (higher rate limits,
@@ -61,7 +62,7 @@ def classify(title: str) -> dict:
     # Apply class boost to focus labels if specified
     for fl in FOCUS_LABELS:
         if fl in by_label:
-            by_label[fl] *= 1.25
+            by_label[fl] *= BOOST_FACTOR
             
     # Normalize probabilities after boosting
     total_prob = sum(by_label.values())
@@ -119,6 +120,7 @@ def generate_code(state: PipelineState) -> dict:
     threshold = 0.5
     max_length = 128
     focus_labels = []
+    boost_factor = 1.25
 
     # Read from retune request if it exists in state
     retune_req = state.get("retune_request")
@@ -126,6 +128,7 @@ def generate_code(state: PipelineState) -> dict:
         suggested = retune_req.get("suggested_params", {})
         threshold = suggested.get("threshold", threshold)
         max_length = suggested.get("max_length", max_length)
+        boost_factor = suggested.get("boost_factor", boost_factor)
         focus_labels = retune_req.get("focus_labels", focus_labels)
 
     code_path = state.get("classifier_code_path") or os.path.join(OUTPUT_DIR, "classifier.py")
@@ -134,7 +137,8 @@ def generate_code(state: PipelineState) -> dict:
     formatted_code = CLASSIFIER_TEMPLATE.format(
         threshold=threshold,
         max_length=max_length,
-        focus_labels=repr(focus_labels)
+        focus_labels=repr(focus_labels),
+        boost_factor=boost_factor
     )
 
     with open(code_path, "w", encoding="utf-8") as f:
@@ -147,7 +151,8 @@ def generate_code(state: PipelineState) -> dict:
         "fine_tuning_params": {
             "threshold": threshold,
             "max_length": max_length,
-            "focus_labels": focus_labels
+            "focus_labels": focus_labels,
+            "boost_factor": boost_factor
         }
     }
 

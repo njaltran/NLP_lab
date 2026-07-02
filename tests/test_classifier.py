@@ -50,7 +50,8 @@ def test_classifier_agent_retune(outdir):
     retune_data = {
         "suggested_params": {
             "threshold": 0.65,
-            "max_length": 64
+            "max_length": 64,
+            "boost_factor": 1.5
         },
         "focus_labels": ["down"]
     }
@@ -69,6 +70,7 @@ def test_classifier_agent_retune(outdir):
     assert res["classifier_metadata"]["fine_tuning_params"]["threshold"] == 0.65
     assert res["classifier_metadata"]["fine_tuning_params"]["max_length"] == 64
     assert res["classifier_metadata"]["fine_tuning_params"]["focus_labels"] == ["down"]
+    assert res["classifier_metadata"]["fine_tuning_params"]["boost_factor"] == 1.5
 
     # Verify classifier.py was updated with new values
     with open(res["classifier_code_path"], "r", encoding="utf-8") as f:
@@ -76,6 +78,7 @@ def test_classifier_agent_retune(outdir):
         assert "THRESHOLD = 0.65" in content
         assert "MAX_LENGTH = 64" in content
         assert "FOCUS_LABELS = ['down']" in content
+        assert "BOOST_FACTOR = 1.5" in content
 
 def test_classifier_to_evaluator_integration(outdir):
     from agents.sabina_evaluator import EvaluatorAgent
