@@ -196,6 +196,18 @@ def test_accuracy_history_accumulates_one_per_iteration():
     assert out["accuracy_history"] == [0.30, 0.40, 0.50]
 
 
+def test_decision_json_carries_accuracy_history(outdir):
+    """decision.json is overwritten every iteration, so accuracy_history is the
+    only on-disk record of the trend — verify it lands in the written file."""
+    g, cfg = _graph(), {"configurable": {"thread_id": "hist-disk"}}
+    base = {"target_accuracy": 0.60, "max_iterations": 9, "patience": 99, "min_delta": 0.0,
+            "predictions_path": PRED}
+    g.invoke({**base, "evaluation_report": _report(0.30)}, cfg)
+    g.invoke({**base, "evaluation_report": _report(0.40)}, cfg)
+    decision = json.loads((outdir / "decision.json").read_text())
+    assert decision["accuracy_history"] == [0.30, 0.40]
+
+
 # --- reproducible sampling ------------------------------------------------
 
 def test_sampling_is_reproducible(outdir):

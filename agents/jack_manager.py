@@ -67,7 +67,10 @@ def _write_json(name: str, obj: dict) -> None:
 
 
 def _write_decision(state: "ManagerState") -> None:
-    """decision.json — Jack's record, written every iteration (Handoff 3b)."""
+    """decision.json — Jack's record, written every iteration (Handoff 3b). The
+    file is overwritten each iteration, so `accuracy_history` (cumulative through
+    the current iteration) is the only place the per-iteration trend survives on
+    disk once the loop moves on."""
     report = state["evaluation_report"]
     _write_json("decision.json", {
         "iteration": state["iteration"],
@@ -76,6 +79,7 @@ def _write_decision(state: "ManagerState") -> None:
         "based_on_proposal": report.get("proposal", {}),
         "overrides": state.get("overrides", {}),
         "notes": state["notes"],
+        "accuracy_history": state.get("accuracy_history", []),
     })
 
 

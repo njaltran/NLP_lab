@@ -97,6 +97,7 @@ Jack owns the threshold gate and the final call; Sabina only recommends. Jack ma
 | based_on_proposal | object | {...} | the `proposal` block from the report Jack decided on |
 | overrides | object | {"max_length": 256} | only if `decision = override` — fields Jack changed; empty object otherwise |
 | notes | string | iteration cap not reached; applying proposal | Jack's rationale |
+| accuracy_history | list of float | [0.42, 0.51, 0.60] | one accuracy per iteration so far, cumulative through this iteration — the file is overwritten each iteration, so this is the trend's only record on disk |
 
 ### `retune_request.json` (Jack → Nadi, only when `final_action = retune`)
 

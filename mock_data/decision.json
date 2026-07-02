@@ -12,5 +12,6 @@
     "code_notes": "threshold hardcoded at 0.5 in classifier.py; the neutral band (+/-1%) may be too narrow for the neutral class"
   },
   "overrides": {},
-  "notes": "cycle 2 accuracy 0.67 is above 0.60; accepting Sabina's proposal to proceed to explanation"
+  "notes": "cycle 2 accuracy 0.67 is above 0.60; accepting Sabina's proposal to proceed to explanation",
+  "accuracy_history": [0.55, 0.67]
 }
