@@ -200,6 +200,7 @@ target is not reachable with this task formulation.
 - Otherwise: **renegotiate the 0.60 target** — the pipeline, contracts, retune loop,
   and evaluation machinery all work as designed; the target was set before anyone
   measured whether the task supports it.
-- `outputs/finbert_finetuned/` is deliberately left in place for inspection, but per
-  the don't-adopt verdict it should be moved aside (or deleted) before the next
-  pipeline run, because Nadi's generated classifier auto-prefers it when present.
+- Per the don't-adopt verdict the weights were moved to
+  `outputs/finbert_finetuned_rejected/` (kept for inspection): Nadi's generated
+  classifier auto-prefers `outputs/finbert_finetuned/` when present, so with the dir
+  gone the next pipeline run falls back to the pretrained sentiment head (verified).
