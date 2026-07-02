@@ -91,9 +91,11 @@ def _write_decision(state: "ManagerState") -> None:
 # truncated. Tune these values here — nothing downstream is hardcoded to them.
 _RETUNE_SCHEDULE = [
     {"threshold": 0.45, "max_length": 128},
-    {"threshold": 0.40, "max_length": 192},
-    {"threshold": 0.35, "max_length": 256},
-    {"threshold": 0.30, "max_length": 256},
+    {"threshold": 0.40, "max_length": 160},
+    {"threshold": 0.35, "max_length": 192},
+    {"threshold": 0.30, "max_length": 224},
+    {"threshold": 0.25, "max_length": 256},
+    {"threshold": 0.20, "max_length": 256},
 ]
 
 

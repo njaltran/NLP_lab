@@ -23,6 +23,7 @@ TARGET_ACCURACY = 0.60
 THRESHOLD_STEP = 0.05    # lower the gate this much per retune so the loop explores
 THRESHOLD_FLOOR = 0.35   # stop here — below this the gate barely forces neutral
 DEFAULT_THRESHOLD = 0.5  # assume when classifier.py has no parseable THRESHOLD
+FOCUS_MARGIN = 0.05      # also flag classes within this much of the weakest score
 LABELS = ("up", "down", "neutral")
 PREDICTION_COLUMNS = [
     "article_id", "date", "ticker", "article_title", "price_t", "price_t1",
@@ -143,7 +144,7 @@ def make_proposal(metrics: dict, code_notes: str, code_text: str = "") -> dict:
     focus_labels = [
         label_name
         for label_name, score in metrics["class_accuracy"].items()
-        if score == weakest_score
+        if score <= weakest_score + FOCUS_MARGIN
     ]
 
     if metrics["below_threshold"]:
