@@ -146,6 +146,16 @@ def generate_code(state: PipelineState) -> dict:
 
     print(f"[nadi] Generated classifier code at: {code_path}")
 
+    # Keep a per-iteration copy so past retune attempts aren't lost when
+    # classifier.py (the single contract file Sabina reads) gets overwritten.
+    # iteration 0 = first pass before any retune; N = the Nth retune's code.
+    iteration = retune_req.get("iteration", 0) if retune_req else 0
+    history_dir = os.path.join(os.path.dirname(code_path) or ".", "classifier_history")
+    os.makedirs(history_dir, exist_ok=True)
+    history_path = os.path.join(history_dir, f"classifier_iter{iteration}.py")
+    with open(history_path, "w", encoding="utf-8") as f:
+        f.write(formatted_code)
+
     metadata = {
         "model_name": "ProsusAI/finbert",
         "fine_tuning_params": {
@@ -158,6 +168,7 @@ def generate_code(state: PipelineState) -> dict:
 
     return {
         "classifier_code_path": code_path,
+        "classifier_history_path": history_path,
         "classifier_metadata": metadata
     }
 

@@ -23,6 +23,9 @@ class PipelineState(TypedDict, total=False):
     # Prof note: Sabina gets code + results, not only predictions CSV
     predictions_path: str       # absolute path to predictions_test.csv
     classifier_code_path: str   # absolute path to classifier.py (the generated script)
+    classifier_history_path: str  # absolute path to this iteration's archived copy
+                                   # (classifier_history/classifier_iterN.py) — classifier.py
+                                   # itself gets overwritten every retune
     classifier_metadata: dict   # model_name, fine_tuning_params, confidence_distribution
 
     # ── Handoff 3: Evaluator → Manager ──────────────────────────────────────
