@@ -238,21 +238,30 @@ def write_retune(state: ManagerState) -> dict:
     return {"decision_log": [f"iteration {state['iteration']}: wrote retune_request.json"]}
 
 
-def proceed(state: ManagerState) -> dict:
-    """sample_for_explanation.csv (Handoff 4) — drawn from predictions_test.csv.
-    Terminal: hands off to Freddi and waits for explanations.csv."""
+def write_sample(predictions_path: str, sample_size: int = 300) -> int:
+    """Write sample_for_explanation.csv (Handoff 4) from a predictions file.
+    Shared by the proceed node and the pipeline's best-iteration restore, so the
+    sample format has exactly one definition."""
     import pandas as pd
 
-    preds = pd.read_csv(state.get("predictions_path", "mock_data/predictions_test.csv"))
+    preds = pd.read_csv(predictions_path)
     sample = (preds[["article_id", "article_title", "predicted_label", "label",
                      "confidence", "prob_up", "prob_down", "prob_neutral"]]
               .rename(columns={"label": "actual_label"}))
-    n = min(len(sample), state.get("sample_size", 300))
+    n = min(len(sample), sample_size)
     if n < len(sample):                                   # only subsample when needed
         sample = sample.sample(n=n, random_state=42)      # representative + reproducible
-    _write_decision(state)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     sample.to_csv(os.path.join(OUTPUT_DIR, "sample_for_explanation.csv"), index=False)
+    return n
+
+
+def proceed(state: ManagerState) -> dict:
+    """sample_for_explanation.csv (Handoff 4) — drawn from predictions_test.csv.
+    Terminal: hands off to Freddi and waits for explanations.csv."""
+    _write_decision(state)
+    n = write_sample(state.get("predictions_path", "mock_data/predictions_test.csv"),
+                     state.get("sample_size", 300))
     return {"decision_log": [f"iteration {state['iteration']}: wrote sample_for_explanation.csv ({n} rows)"]}
 
 

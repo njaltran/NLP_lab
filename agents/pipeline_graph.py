@@ -20,7 +20,12 @@ changes. The retune loop becomes a real graph edge; that was the goal.
 ## Graph shape
 
     START → process → classify → evaluate → gate ─(retune)→ classify   [CYCLE]
-                                              └(proceed)→ explain → finalize → END
+                                              └(proceed)→ select_best → explain → finalize → END
+
+`evaluate` snapshots each new-best iteration's artifacts into `outputs/best/`;
+`select_best` restores that snapshot (and redraws the explanation sample) when the
+loop's LAST iteration wasn't its best — accuracy can regress across retunes, and
+without this the pipeline would finalize on the regressed predictions.
 
 `gate` is the Manager: calling it writes either `retune_request.json` (retune) or
 `sample_for_explanation.csv` (proceed). Its own checkpointer carries the iteration
@@ -36,7 +41,9 @@ real cycle + Manager gate offline. `Agents.build()` constructs the real ones.
 
 from __future__ import annotations
 
+import json
 import os
+import shutil
 from dataclasses import dataclass
 
 from typing_extensions import TypedDict
@@ -46,13 +53,13 @@ try:
     from agents.nadi_classifier import ClassifierAgent
     from agents.sabina_evaluator import EvaluatorAgent
     from agents.freddi_explanation import ExplanationAgent
-    from agents.jack_manager import ManagerAgent, OUTPUT_DIR as OUT
+    from agents.jack_manager import ManagerAgent, write_sample, OUTPUT_DIR as OUT
 except ModuleNotFoundError:  # running as a bare script with agents/ on sys.path
     from aurora_processing import ProcessingAgent
     from nadi_classifier import ClassifierAgent
     from sabina_evaluator import EvaluatorAgent
     from freddi_explanation import ExplanationAgent
-    from jack_manager import ManagerAgent, OUTPUT_DIR as OUT
+    from jack_manager import ManagerAgent, write_sample, OUTPUT_DIR as OUT
 
 # Contract files exchanged between the nodes. All live under the Manager's
 # OUTPUT_DIR except processed_data.csv, whose path Aurora returns at runtime.
@@ -62,6 +69,10 @@ EVAL = os.path.join(OUT, "evaluation_report.json")
 SAMPLE = os.path.join(OUT, "sample_for_explanation.csv")
 RETUNE = os.path.join(OUT, "retune_request.json")
 EXPL = os.path.join(OUT, "explanations.csv")
+
+# Snapshot dir for the best iteration's artifacts (internal to the loop, not a
+# contract handoff). Holds copies of CODE/PREDS/EVAL from the highest-accuracy pass.
+BEST_DIR = os.path.join(OUT, "best")
 
 # A retune cycle is 3 nodes (classify → evaluate → gate); with the process/explain/
 # finalize tail, ~5 iterations stays well under this. LangGraph aborts a runaway
@@ -78,6 +89,8 @@ class PipelineState(TypedDict, total=False):
     retune_request_path: str | None  # None on the first pass; RETUNE on cycle passes
     final_action: str               # the gate's verdict: "retune" | "proceed"
     iteration: int                  # Manager's loop counter (for reporting)
+    last_accuracy: float            # accuracy of the most recent evaluate pass
+    best_accuracy: float            # best accuracy seen across cycle passes
 
 
 @dataclass
@@ -136,9 +149,19 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
         return {}
 
     def evaluate(state: PipelineState) -> dict:
-        """Sabina: score the predictions and write evaluation_report.json."""
+        """Sabina: score the predictions and write evaluation_report.json. Also
+        snapshots this pass's artifacts into BEST_DIR whenever accuracy sets a new
+        best, so `select_best` can restore them if later retunes regress."""
         agents.sabina.run(predictions=PREDS, classifier_code=CODE)
-        return {}
+        with open(EVAL, encoding="utf-8") as f:
+            acc = json.load(f)["accuracy"]
+        out = {"last_accuracy": acc}
+        if acc > state.get("best_accuracy", -1.0):
+            os.makedirs(BEST_DIR, exist_ok=True)
+            for path in (PREDS, EVAL, CODE):
+                shutil.copy2(path, os.path.join(BEST_DIR, os.path.basename(path)))
+            out["best_accuracy"] = acc
+        return out
 
     def gate(state: PipelineState) -> dict:
         """Manager gate. Invoking it applies the accuracy gate (with convergence +
@@ -151,6 +174,24 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
         if st["final_action"] == "retune":
             out["retune_request_path"] = RETUNE  # fed back into `classify` on the cycle
         return out
+
+    def select_best(state: PipelineState) -> dict:
+        """The gate proceeded with the LAST iteration's artifacts, which are not
+        necessarily the best ones (accuracy can regress across retunes). If an
+        earlier pass scored higher, restore its snapshot over the canonical paths
+        and redraw the explanation sample from the restored predictions, so
+        explain/finalize run on the best iteration. Gate semantics are untouched:
+        the Manager already made its verdict from the last iteration's report."""
+        best, last = state.get("best_accuracy", -1.0), state.get("last_accuracy", -1.0)
+        if best <= last:
+            return {}
+        for path in (PREDS, EVAL, CODE):
+            shutil.copy2(os.path.join(BEST_DIR, os.path.basename(path)), path)
+        sample_size = getattr(agents.manager, "_defaults", {}).get("sample_size", 300)
+        write_sample(PREDS, sample_size)
+        print(f"[pipeline] last iteration regressed ({last:.2f}) — restored best "
+              f"iteration's artifacts ({best:.2f}) for explanation + finals")
+        return {}
 
     def explain(state: PipelineState) -> dict:
         """Freddi: justify each sampled prediction into explanations.csv."""
@@ -170,13 +211,15 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
 
     b = StateGraph(PipelineState)
     for name, fn in [("process", process), ("classify", classify), ("evaluate", evaluate),
-                     ("gate", gate), ("explain", explain), ("finalize", finalize)]:
+                     ("gate", gate), ("select_best", select_best), ("explain", explain),
+                     ("finalize", finalize)]:
         b.add_node(name, fn)
     b.add_edge(START, "process")
     b.add_edge("process", "classify")
     b.add_edge("classify", "evaluate")
     b.add_edge("evaluate", "gate")
-    b.add_conditional_edges("gate", route, {"retune": "classify", "proceed": "explain"})
+    b.add_conditional_edges("gate", route, {"retune": "classify", "proceed": "select_best"})
+    b.add_edge("select_best", "explain")
     b.add_edge("explain", "finalize")
     b.add_edge("finalize", END)
     return b.compile(checkpointer=checkpointer)
