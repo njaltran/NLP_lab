@@ -48,9 +48,11 @@ def test_classifier_agent_retune(outdir):
     retune_path = outdir / "retune_request.json"
 
     retune_data = {
+        "iteration": 1,
         "suggested_params": {
             "threshold": 0.65,
-            "max_length": 64
+            "max_length": 64,
+            "boost_factor": 1.5
         },
         "focus_labels": ["down"]
     }
@@ -69,6 +71,7 @@ def test_classifier_agent_retune(outdir):
     assert res["classifier_metadata"]["fine_tuning_params"]["threshold"] == 0.65
     assert res["classifier_metadata"]["fine_tuning_params"]["max_length"] == 64
     assert res["classifier_metadata"]["fine_tuning_params"]["focus_labels"] == ["down"]
+    assert res["classifier_metadata"]["fine_tuning_params"]["boost_factor"] == 1.5
 
     # Verify classifier.py was updated with new values
     with open(res["classifier_code_path"], "r", encoding="utf-8") as f:
@@ -76,6 +79,35 @@ def test_classifier_agent_retune(outdir):
         assert "THRESHOLD = 0.65" in content
         assert "MAX_LENGTH = 64" in content
         assert "FOCUS_LABELS = ['down']" in content
+        assert "BOOST_FACTOR = 1.5" in content
+
+    # Verify this iteration's code was archived, named by retune_request's iteration
+    assert res["classifier_history_path"].endswith("classifier_iter1.py")
+    with open(res["classifier_history_path"], "r", encoding="utf-8") as f:
+        assert f.read() == content
+
+
+def test_classifier_archives_each_iteration_separately(outdir):
+    """Past retune attempts must survive classifier.py being overwritten."""
+    code_path = outdir / "classifier.py"
+    pred_path = outdir / "predictions_test.csv"
+    agent = ClassifierAgent()
+
+    first = agent.run(processed_data=PROCESSED_DATA, classifier_code=str(code_path),
+                      predictions=str(pred_path))
+    assert first["classifier_history_path"].endswith("classifier_iter0.py")
+
+    retune_path = outdir / "retune_request.json"
+    with open(retune_path, "w", encoding="utf-8") as f:
+        json.dump({"iteration": 1, "suggested_params": {"threshold": 0.4}}, f)
+    second = agent.run(processed_data=PROCESSED_DATA, classifier_code=str(code_path),
+                       predictions=str(pred_path), retune_request=str(retune_path))
+    assert second["classifier_history_path"].endswith("classifier_iter1.py")
+
+    # Both archived copies exist even though classifier.py itself was overwritten.
+    assert os.path.exists(first["classifier_history_path"])
+    assert os.path.exists(second["classifier_history_path"])
+    assert first["classifier_history_path"] != second["classifier_history_path"]
 
 def test_classifier_to_evaluator_integration(outdir):
     from agents.sabina_evaluator import EvaluatorAgent

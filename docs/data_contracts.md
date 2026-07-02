@@ -35,6 +35,8 @@ Nadi is a code-generation agent: it **generates the classifier as a Python scrip
 
 The Python Nadi generated to produce the predictions. Sabina reads it to ground her proposal (e.g. spotting a hardcoded threshold or `max_length`). Must run standalone with `processed_data.csv` as input and write `predictions_test.csv`.
 
+Overwritten every retune, so Nadi also archives each iteration's code to `classifier_history/classifier_iter{N}.py` (`N` = the retune's `iteration`, `0` for the first pass before any retune). Audit trail only — nothing downstream reads it.
+
 ### `predictions_test.csv`
 
 Nadi receives `processed_data.csv` from Aurora and adds the prediction columns. The file passed to Sabina contains all of the following:
@@ -97,6 +99,7 @@ Jack owns the threshold gate and the final call; Sabina only recommends. Jack ma
 | based_on_proposal | object | {...} | the `proposal` block from the report Jack decided on |
 | overrides | object | {"max_length": 256} | only if `decision = override` — fields Jack changed; empty object otherwise |
 | notes | string | iteration cap not reached; applying proposal | Jack's rationale |
+| accuracy_history | list of float | [0.42, 0.51, 0.60] | one accuracy per iteration so far, cumulative through this iteration — the file is overwritten each iteration, so this is the trend's only record on disk |
 
 ### `retune_request.json` (Jack → Nadi, only when `final_action = retune`)
 
@@ -110,7 +113,7 @@ The approved proposal Nadi acts on — Sabina's proposal as accepted or overridd
 | target_accuracy | float | 0.60 | threshold to clear |
 | focus_labels | list | ["down", "neutral"] | approved focus classes |
 | misclassified_ids | list | ["FNSPID_00423", ...] | rows to inspect or reweight |
-| suggested_params | object | {"threshold": 0.5, "max_length": 128} | approved hyperparameters Nadi regenerates the code with |
+| suggested_params | object | {"threshold": 0.5, "max_length": 128, "boost_factor": 1.25} | approved hyperparameters Nadi regenerates the code with; `boost_factor` (default 1.25) scales the softmax probability of each `focus_labels` class before renormalizing |
 
 ## Handoff 4 — Manager Agent (Jack) → Explanation Agent (Freddi)
 
