@@ -66,6 +66,88 @@ class FakeSabina:
         return {"output_path": "outputs/evaluation_report.json"}
 
 
+class MarkedNadi:
+    """FakeNadi variant that stamps every predictions file with the pass number,
+    so the test can tell WHICH iteration's artifacts survived to the end."""
+    def __init__(self):
+        self.calls = 0
+
+    def run(self, *, processed_data, classifier_code, predictions, retune_request=None):
+        self.calls += 1
+        Path(predictions).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(MOCK_PRED, predictions)
+        import pandas as pd
+        df = pd.read_csv(predictions)
+        df["fake_pass"] = self.calls
+        df.to_csv(predictions, index=False)
+        Path(classifier_code).write_text(f"THRESHOLD = 0.5  # pass {self.calls}\n")
+        return {}
+
+
+class PeakSabina:
+    """Accuracy peaks on pass 2 then regresses, so the best iteration is NOT the
+    last one the gate proceeds with — exactly the case select_best must fix."""
+    ACCS = [0.20, 0.39, 0.30, 0.30, 0.30, 0.30, 0.30, 0.30]
+
+    def __init__(self):
+        self.calls = 0
+
+    def run(self, *, predictions, classifier_code):
+        acc = self.ACCS[self.calls]
+        self.calls += 1
+        report = {
+            "accuracy": acc,
+            "below_threshold": True,
+            "class_accuracy": {"up": 0.3, "down": 0.2, "neutral": 0.5},
+            "misclassified_ids": [],
+            "proposal": {"recommended_action": "retune", "reason": "low",
+                         "focus_labels": ["down"],
+                         "suggested_params": {"threshold": 0.5, "max_length": 128},
+                         "code_notes": ""},
+        }
+        os.makedirs("outputs", exist_ok=True)
+        Path("outputs/evaluation_report.json").write_text(json.dumps(report))
+        return {"output_path": "outputs/evaluation_report.json"}
+
+
+@needs_langgraph
+def test_best_iteration_restored_when_accuracy_regresses(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "outputs").mkdir()
+
+    import pandas as pd
+    import agents.pipeline_graph as pg
+    from agents.jack_manager import ManagerAgent
+    from agents.freddi_explanation import ExplanationAgent
+    from langgraph.checkpoint.memory import MemorySaver
+
+    nadi, sabina = MarkedNadi(), PeakSabina()
+    agents = pg.Agents(
+        aurora=FakeAurora(), nadi=nadi, sabina=sabina,
+        manager=ManagerAgent(predictions_path=pg.PREDS, target_accuracy=0.60,
+                             max_iterations=6, patience=2, min_delta=0.01),
+        freddi=ExplanationAgent(use_ollama=False, output_path=pg.EXPL),
+    )
+    graph = pg.build_pipeline(agents, checkpointer=MemorySaver())
+    final = graph.invoke({"retune_request_path": None},
+                         {"configurable": {"thread_id": "t"}, "recursion_limit": pg.RECURSION_LIMIT})
+
+    assert final["final_action"] == "proceed"
+    assert nadi.calls >= 3, "loop must run past the accuracy peak for this test to bite"
+
+    # The artifacts that survive are the BEST pass's (accuracy 0.39 = pass 2),
+    # not the last pass's — the whole point of select_best.
+    preds = pd.read_csv(tmp_path / "outputs" / "predictions_test.csv")
+    assert preds["fake_pass"].iloc[0] == 2, "final predictions should come from the best pass"
+    report = json.loads((tmp_path / "outputs" / "evaluation_report.json").read_text())
+    assert report["accuracy"] == 0.39
+    final_report = json.loads((tmp_path / "outputs" / "final_report.json").read_text())
+    assert final_report["final_accuracy"] == 0.39
+
+    # The explanation sample was redrawn from the restored predictions.
+    assert (tmp_path / "outputs" / "sample_for_explanation.csv").exists()
+
+
 @needs_langgraph
 def test_graph_cycles_then_finalizes(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
