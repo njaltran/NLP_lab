@@ -126,6 +126,30 @@ Manager-internal (no other agent reads them). No handoff format changes, so no
 downstream agent is affected — a courtesy heads-up to Nadi/Sabina suffices per
 AGENTS.md, not a contract negotiation.
 
+## Follow-up improvements (2026-07-02)
+
+Increment 1 (convergence + escalation, above) shipped but the 2026-06-30 run still
+plateaued at accuracy **0.37** across all 3 iterations — the loop stopped repeating
+identical params, but each retune still wasn't moving the needle much. Five small
+fixes, in the order applied:
+
+| # | Change | File | Commit | Impact |
+|---|---|---|---|---|
+| 1 | `_next_threshold()`: retune proposes classifier's current `THRESHOLD` stepped down 0.05 (floored), instead of Sabina always suggesting fixed 0.5 | `sabina_evaluator.py` | `41bf309` | Each retune now explores a gate not already tried on the *first* retune too, not just later ones |
+| 2 | `decision.json` now includes cumulative `accuracy_history` | `jack_manager.py` | `f8ed00c` | Auditability fix — the file is overwritten every iteration, so the per-iteration trend was previously lost once the loop moved past iteration 1 |
+| 3 | `focus_labels` widened from "exact min score" to "within `FOCUS_MARGIN` (0.05) of weakest" | `sabina_evaluator.py` | `de318f9` | Fixes a real bug: with `up=0.30, down=0.28, neutral=0.45`, only `down` was ever boosted — `up`, nearly as broken, got no help. Also widened `_RETUNE_SCHEDULE` from 4 to 6 finer steps |
+| 4 | Aligned Sabina's `THRESHOLD_FLOOR` (was 0.35) with the Manager schedule's floor (0.20) | `sabina_evaluator.py` | `57f7d02` | The first retune stopped exploring earlier than later retunes would — inconsistency, not by design |
+| 5 | Nadi's focus-label boost (hardcoded `1.25x`) is now a retune param (`boost_factor`), escalated 1.25→1.75 in `_RETUNE_SCHEDULE` | `nadi_classifier.py`, `jack_manager.py` | `f712c82` | The one lever that changes *how hard* focus labels get pushed, not just which gate/labels are targeted. **Crosses into Nadi's owned file** — flagged in the commit, not yet signed off per AGENTS.md |
+
+**Ceiling caveat (unchanged from the original problem statement):** all five fixes
+reshuffle a frozen, pretrained FinBERT sentiment head — none of them retrain the
+model. Sentiment (positive/negative/neutral) is a weak proxy for next-day price
+direction, so these are expected to make each retune step count for more, not to
+guarantee reaching the 0.60 target. Actually fine-tuning FinBERT on labeled
+up/down/neutral data is the only change identified that could raise the ceiling
+itself; it's a much larger scope change (~100+ LOC, new training path, Nadi's file)
+and is not part of this increment.
+
 ## Deferred (future increments)
 
 - **1b — cycle subgraph:** make `classifier → evaluator → gate` a LangGraph subgraph
