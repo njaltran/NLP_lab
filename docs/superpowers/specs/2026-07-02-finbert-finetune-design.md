@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-02
 **Owner:** Jack (proposal) — implementation lands in Nadi's classifier, so **requires Nadi's sign-off**; the split change touches Aurora's output, so **requires Aurora's sign-off** too.
-**Status:** proposed — awaiting review
+**Status:** implemented and run — **verdict: do not adopt** (results at bottom). Owner review of the Aurora/Nadi changes still pending.
 
 ## Problem
 
@@ -150,3 +150,56 @@ handoff chain; only Nadi's generated script reads the model dir.
 - Headline aggregation per ticker-day (multiple headlines → one prediction).
 - Non-text features (momentum, volume) — would need a different model head.
 - Per-iteration retraining driven by the retune loop.
+
+---
+
+## Results (2026-07-02 run)
+
+Trained as specced, option (c): dataset ended at 2019-12-31, time-based 80/20 cut at
+**2019-08-15** → 7,991 train / 880 val (Jun–Aug 2019) / 2,196 test (Aug–Dec 2019,
+pre-COVID). 3 epochs, batch 16, lr 2e-5, seed 42, ~12 min on M-series MPS. Full
+record: `outputs/finetune_report.json`.
+
+| Model | Test accuracy |
+|---|---|
+| Pretrained FinBERT sentiment (prior runs) | 0.37 |
+| **Fine-tuned FinBERT (this run)** | **0.4608** |
+| All-neutral baseline (this test window) | **0.5159** |
+
+Per-class (fine-tuned): neutral **0.70**, down **0.34**, up **0.10**.
+
+| Epoch | Train loss | Val accuracy |
+|---|---|---|
+| 1 | 1.1158 | **0.4205** ← saved checkpoint |
+| 2 | 1.0756 | 0.3693 |
+| 3 | 1.0314 | 0.3648 |
+
+### Interpretation
+
+1. **Fine-tuning did extract real signal** — +9 points over the pretrained sentiment
+   head. The zero-signal finding was about *sentiment*, and training on the move
+   labels found some non-sentiment textual signal.
+2. **But the model still loses to "always predict neutral"** by 5.5 points on the
+   held-out window. The `up` class is essentially never right (0.10).
+3. **Overfitting was immediate**: validation peaked at epoch 1 and degraded while
+   train loss kept falling. More epochs / more tuning will not close a 5.5-point gap
+   to the majority baseline; the ceiling is the data, not the optimizer.
+
+### Decision (per §4 success criteria)
+
+Test accuracy **< all-neutral baseline → do not adopt.** The measured honest ceiling
+of one-headline → next-day-direction on this dataset is ~0.46–0.52, and the 0.60
+target is not reachable with this task formulation.
+
+**Recommendations to the team:**
+
+- Treat **0.516 (all-neutral)** as the honest baseline any future model must beat.
+- If the project continues on prediction quality: headline **aggregation per
+  ticker-day** and/or **non-text features** (momentum, volume) are the remaining
+  levers — both are new increments, not tweaks.
+- Otherwise: **renegotiate the 0.60 target** — the pipeline, contracts, retune loop,
+  and evaluation machinery all work as designed; the target was set before anyone
+  measured whether the task supports it.
+- `outputs/finbert_finetuned/` is deliberately left in place for inspection, but per
+  the don't-adopt verdict it should be moved aside (or deleted) before the next
+  pipeline run, because Nadi's generated classifier auto-prefers it when present.
