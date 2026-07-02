@@ -109,6 +109,48 @@ def test_classifier_archives_each_iteration_separately(outdir):
     assert os.path.exists(second["classifier_history_path"])
     assert first["classifier_history_path"] != second["classifier_history_path"]
 
+def test_generated_code_prefers_finetuned_model_when_present(outdir, monkeypatch):
+    """generate_code points the script at outputs/finbert_finetuned when the dir
+    exists, and falls back to the pretrained hub model (MODEL_DIR = None) when
+    it doesn't. Template-level check — no model download."""
+    from agents.nadi_classifier import generate_code
+
+    # No fine-tuned dir -> fallback
+    code_path = outdir / "classifier.py"
+    res = generate_code({"classifier_code_path": str(code_path)})
+    content = code_path.read_text()
+    assert "MODEL_DIR = None" in content
+    assert res["classifier_metadata"]["model_name"] == "ProsusAI/finbert"
+
+    # Fine-tuned dir present -> preferred
+    model_dir = outdir / "finbert_finetuned"
+    model_dir.mkdir()
+    res = generate_code({"classifier_code_path": str(code_path),
+                         "model_dir": str(model_dir)})
+    content = code_path.read_text()
+    assert f"MODEL_DIR = {str(model_dir)!r}" in content
+    assert res["classifier_metadata"]["model_name"] == str(model_dir)
+
+
+def test_predictions_only_contain_test_split_rows(outdir):
+    """With Aurora's split column in the input, the generated classifier predicts
+    only split=test rows (train rows were seen in fine-tuning)."""
+    df = pd.read_csv(PROCESSED_DATA)
+    assert "split" in df.columns and (df["split"] == "train").any()
+
+    code_path = outdir / "classifier.py"
+    pred_path = outdir / "predictions_test.csv"
+    ClassifierAgent().run(processed_data=PROCESSED_DATA,
+                          classifier_code=str(code_path), predictions=str(pred_path))
+
+    out = pd.read_csv(pred_path)
+    assert len(out) == (df["split"] == "test").sum()
+    assert (out["split"] == "test").all()
+    assert set(out["article_id"]) == set(df[df["split"] == "test"]["article_id"])
+    # split stays the last column per the contract
+    assert list(out.columns)[-1] == "split"
+
+
 def test_classifier_to_evaluator_integration(outdir):
     from agents.sabina_evaluator import EvaluatorAgent
 

@@ -32,6 +32,7 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 MODEL = "ProsusAI/finbert"
+MODEL_DIR = {model_dir}  # fine-tuned weights dir; None -> pretrained sentiment head
 MAX_LENGTH = {max_length}
 THRESHOLD = {threshold}
 FOCUS_LABELS = {focus_labels}
@@ -42,11 +43,17 @@ SENTIMENT_TO_LABEL = {{"positive": "up", "negative": "down", "neutral": "neutral
 # faster downloads); fall back to unauthenticated access when it is absent.
 HF_TOKEN = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL, token=HF_TOKEN)
-model = AutoModelForSequenceClassification.from_pretrained(MODEL, token=HF_TOKEN)
+if MODEL_DIR and os.path.isdir(MODEL_DIR):
+    # Fine-tuned on our move labels: id2label is already up/down/neutral.
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
+    model = AutoModelForSequenceClassification.from_pretrained(MODEL_DIR)
+    ID2OURS = {{i: model.config.id2label[i].lower() for i in model.config.id2label}}
+else:
+    # Pretrained sentiment head: translate sentiment -> move direction.
+    tokenizer = AutoTokenizer.from_pretrained(MODEL, token=HF_TOKEN)
+    model = AutoModelForSequenceClassification.from_pretrained(MODEL, token=HF_TOKEN)
+    ID2OURS = {{i: SENTIMENT_TO_LABEL[model.config.id2label[i].lower()] for i in model.config.id2label}}
 model.eval()
-
-ID2OURS = {{i: SENTIMENT_TO_LABEL[model.config.id2label[i].lower()] for i in model.config.id2label}}
 
 def classify(title: str) -> dict:
     inputs = tokenizer(title, return_tensors="pt", truncation=True, max_length=MAX_LENGTH)
@@ -90,11 +97,19 @@ def main(src: str, dst: str) -> None:
     if not rows:
         raise ValueError("Source file is empty")
         
-    out_cols = list(rows[0].keys()) + [
+    # When Aurora supplies a train/test split, predict only the held-out test
+    # rows (training rows were seen by the fine-tuned model). Without a split
+    # column every row is treated as test (pre-split behavior).
+    if "split" in rows[0]:
+        rows = [r for r in rows if r["split"] == "test"]
+        if not rows:
+            raise ValueError("No split=test rows in source file")
+
+    # split goes last per the contract, wherever it sat in the input.
+    out_cols = [c for c in rows[0].keys() if c != "split"] + [
         "predicted_label", "confidence", "prob_up", "prob_down", "prob_neutral", "split"
     ]
-    
-    # Process all rows and mark them as test split
+
     for row in rows:
         pred_data = classify(row["article_title"])
         row.update(pred_data)
@@ -131,11 +146,19 @@ def generate_code(state: PipelineState) -> dict:
     code_path = state.get("classifier_code_path") or os.path.join(OUTPUT_DIR, "classifier.py")
     os.makedirs(os.path.dirname(code_path) or ".", exist_ok=True)
 
+    # Prefer fine-tuned weights when a training run has produced them (see
+    # agents/finetune_finbert.py); otherwise the generated script falls back to
+    # the pretrained sentiment head.
+    model_dir = state.get("model_dir") or os.path.join(OUTPUT_DIR, "finbert_finetuned")
+    if not os.path.isdir(model_dir):
+        model_dir = None
+
     formatted_code = CLASSIFIER_TEMPLATE.format(
         threshold=threshold,
         max_length=max_length,
         focus_labels=repr(focus_labels),
-        boost_factor=boost_factor
+        boost_factor=boost_factor,
+        model_dir=repr(model_dir)
     )
 
     with open(code_path, "w", encoding="utf-8") as f:
@@ -154,7 +177,7 @@ def generate_code(state: PipelineState) -> dict:
         f.write(formatted_code)
 
     metadata = {
-        "model_name": "ProsusAI/finbert",
+        "model_name": model_dir or "ProsusAI/finbert",
         "fine_tuning_params": {
             "threshold": threshold,
             "max_length": max_length,

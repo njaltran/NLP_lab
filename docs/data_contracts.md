@@ -24,6 +24,7 @@ Built by joining FNSPID headlines to yfinance prices on `ticker` + publication d
 | price_t1 | float | 125.12 | closing price on next trading day (from yfinance) |
 | pct_change | float | 3.38 | percentage change T to T+1 |
 | label | string | up | >+1% = up, <-1% = down, in between = neutral |
+| split | string | train | time-based: earliest 80% of dates = `train`, rest = `test` — so no future information leaks into fine-tuning. Nadi trains on `train` rows and predicts `test` rows only |
 
 ## Handoff 2 — Classifier Agent (Nadi) → Evaluator Agent (Sabina)
 
@@ -56,7 +57,7 @@ Nadi receives `processed_data.csv` from Aurora and adds the prediction columns. 
 | prob_up | float | 0.87 | **added by Nadi** — softmax probability for `up` |
 | prob_down | float | 0.05 | **added by Nadi** — softmax probability for `down` |
 | prob_neutral | float | 0.08 | **added by Nadi** — softmax probability for `neutral` (`prob_up + prob_down + prob_neutral ≈ 1`) |
-| split | string | test | **added by Nadi** — all rows in this file must be test rows only |
+| split | string | test | all rows in this file must be test rows only — Nadi predicts only Aurora's `split=test` rows (train rows were seen by the fine-tuned model; see `agents/finetune_finbert.py`) |
 
 ## Handoff 3 — Evaluator Agent (Sabina) → Manager Agent (Jack)
 

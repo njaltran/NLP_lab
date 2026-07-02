@@ -75,6 +75,24 @@ def _assign_label(pct_change, threshold):
 # Processing node
 # ---------------------------------------------------------------------------
 
+def _assign_split(df, dataset_end=None):
+    """Add a time-based train/test `split` column: earliest 80% of dates = train,
+    rest = test. Date-based (not random) so no future information leaks into
+    training. `dataset_end` (YYYY-MM-DD) optionally drops later rows first —
+    e.g. "2019-12-31" keeps the COVID regime out of the test window (see
+    docs/superpowers/specs/2026-07-02-finbert-finetune-design.md)."""
+    if dataset_end:
+        before = len(df)
+        df = df[pd.to_datetime(df["date"]) <= pd.to_datetime(dataset_end)].reset_index(drop=True)
+        print(f"  Dataset ended at {dataset_end}: dropped {before - len(df):,} later rows")
+    split_cut = pd.to_datetime(df["date"]).quantile(0.8)
+    df["split"] = ["train" if d <= split_cut else "test"
+                   for d in pd.to_datetime(df["date"])]
+    print(f"  Split at {split_cut.date()}: "
+          f"{(df['split'] == 'train').sum():,} train / {(df['split'] == 'test').sum():,} test")
+    return df
+
+
 def processing_node(state: PipelineState) -> dict:
     """LangGraph node — runs the full processing pipeline and returns the
     output file path as `processed_data_path` in the state."""
@@ -145,10 +163,13 @@ def processing_node(state: PipelineState) -> dict:
     ].reset_index(drop=True)
     print(f"  Outliers dropped: {before_outliers - len(df):,}. Final: {len(df):,} rows")
 
+    # 5b. Time-based train/test split (and optional dataset end date).
+    df = _assign_split(df, state.get("dataset_end"))
+
     # 6. Export (Handoff 1 schema from data_contracts.md)
     output_cols = [
         "article_id", "date", "ticker", "article_title",
-        "price_t", "price_t1", "pct_change", "label",
+        "price_t", "price_t1", "pct_change", "label", "split",
     ]
     df[output_cols].to_csv(out_path, index=False)
     print(f"[processing] Written to {out_path}")
