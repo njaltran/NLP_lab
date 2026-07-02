@@ -104,9 +104,18 @@ _RETUNE_SCHEDULE = [
 def _next_params(tried: list) -> dict:
     """Pick the next retune params: the first schedule entry not already tried,
     or the last entry once the schedule is exhausted (the iteration cap still
-    bounds the loop, so returning a repeat here is safe)."""
+    bounds the loop, so returning a repeat here is safe).
+
+    "Already tried" compares only the keys both dicts share: Sabina's proposal
+    omits params she doesn't set (e.g. `boost_factor`), and Nadi fills those from
+    the same defaults the schedule starts at — so a schedule entry that matches a
+    tried set on every shared key would regenerate an identical classifier."""
+    def _same(a: dict, b: dict) -> bool:
+        shared = a.keys() & b.keys()
+        return bool(shared) and all(a[k] == b[k] for k in shared)
+
     for params in _RETUNE_SCHEDULE:
-        if params not in tried:
+        if not any(_same(params, t) for t in tried):
             return params
     return _RETUNE_SCHEDULE[-1]
 

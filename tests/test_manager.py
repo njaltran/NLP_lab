@@ -186,6 +186,25 @@ def test_retune_params_adapt_and_do_not_repeat():
     assert {"threshold", "max_length"} <= set(seen[-1])
 
 
+def test_second_retune_skips_schedule_entry_matching_sabinas_proposal():
+    """Regression (2026-07-02 run): Sabina's accepted first-retune proposal
+    {threshold: 0.45, max_length: 128} lacks the schedule's boost_factor key, so
+    plain dict equality treated schedule entry 0 (same threshold/max_length) as
+    untried and the second retune regenerated an identical classifier. Matching
+    must compare shared keys only."""
+    g, cfg = _graph(), {"configurable": {"thread_id": "shared-keys"}}
+    base = {"target_accuracy": 0.60, "max_iterations": 9, "patience": 99, "min_delta": 0.0,
+            "predictions_path": PRED}
+    report = _report(0.37)
+    report["proposal"]["suggested_params"] = {"threshold": 0.45, "max_length": 128}
+
+    first = g.invoke({**base, "evaluation_report": report}, cfg)["tried_params"][-1]
+    second = g.invoke({**base, "evaluation_report": report}, cfg)["tried_params"][-1]
+    assert first == {"threshold": 0.45, "max_length": 128}
+    # second retune must not re-run the same threshold/max_length combination
+    assert (second["threshold"], second["max_length"]) != (0.45, 128)
+
+
 def test_accuracy_history_accumulates_one_per_iteration():
     g, cfg = _graph(), {"configurable": {"thread_id": "hist"}}
     base = {"target_accuracy": 0.60, "max_iterations": 9, "patience": 99, "min_delta": 0.0,
