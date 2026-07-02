@@ -107,22 +107,17 @@ class Agents:
         )
 
 
-def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, dataset_end=None,
-                   checkpointer=None):
+def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, checkpointer=None):
     """Compile the unified pipeline graph. `agents` supplies the five agents (real
     or fake); `threshold` is Aurora's labelling band; `data_dir` overrides where
-    Aurora reads fnspid_raw.csv (defaults to the repo `data/`); `dataset_end`
-    (YYYY-MM-DD) drops later rows before Aurora's train/test split. The node
-    functions close over these, so no non-serialisable objects live in the graph
-    state.
+    Aurora reads fnspid_raw.csv (defaults to the repo `data/`). The node functions
+    close over these, so no non-serialisable objects live in the graph state.
     """
     from langgraph.graph import StateGraph, START, END
 
     def process(state: PipelineState) -> dict:
         """Aurora: build the labelled dataset. Runs once, before the loop."""
         extra = {"data_dir": data_dir} if data_dir else {}
-        if dataset_end:
-            extra["dataset_end"] = dataset_end
         processed = agents.aurora.run(threshold=threshold, **extra)["processed_data_path"]
         return {"processed_data_path": processed}
 
@@ -183,8 +178,7 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, dataset_end
 
 
 def run(*, threshold=0.01, target_accuracy=0.60, max_iterations=5, patience=2,
-        min_delta=0.01, sample_size=300, use_ollama=True, data_dir=None,
-        dataset_end=None) -> dict:
+        min_delta=0.01, sample_size=300, use_ollama=True, data_dir=None) -> dict:
     """Build the pipeline with real agents and run it once end to end, returning the
     final graph state. This is the entry point `main.py` calls."""
     from langgraph.checkpoint.memory import MemorySaver
@@ -193,7 +187,7 @@ def run(*, threshold=0.01, target_accuracy=0.60, max_iterations=5, patience=2,
                           patience=patience, min_delta=min_delta, sample_size=sample_size,
                           use_ollama=use_ollama)
     graph = build_pipeline(agents, threshold=threshold, data_dir=data_dir,
-                           dataset_end=dataset_end, checkpointer=MemorySaver())
+                           checkpointer=MemorySaver())
     return graph.invoke(
         {"retune_request_path": None},
         {"configurable": {"thread_id": "pipeline"}, "recursion_limit": RECURSION_LIMIT},
