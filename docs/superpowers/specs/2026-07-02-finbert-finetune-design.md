@@ -200,7 +200,8 @@ target is not reachable with this task formulation.
 - Otherwise: **renegotiate the 0.60 target** — the pipeline, contracts, retune loop,
   and evaluation machinery all work as designed; the target was set before anyone
   measured whether the task supports it.
-- Per the don't-adopt verdict the weights were moved to
-  `outputs/finbert_finetuned_rejected/` (kept for inspection): Nadi's generated
-  classifier auto-prefers `outputs/finbert_finetuned/` when present, so with the dir
-  gone the next pipeline run falls back to the pretrained sentiment head (verified).
+- Weights were briefly moved aside per the verdict, then **restored to
+  `outputs/finbert_finetuned/` at Jack's direction** — pipeline runs use the
+  fine-tuned model for now (it beats pretrained 0.46 vs 0.37, even though both sit
+  below the all-neutral 0.516 baseline). Delete/move the dir to fall back to the
+  pretrained sentiment head; the generated classifier picks whichever is present.
