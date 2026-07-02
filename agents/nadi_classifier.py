@@ -24,10 +24,7 @@ except ModuleNotFoundError:
 
 OUTPUT_DIR = "outputs"
 
-CLASSIFIER_TEMPLATE = """\"\"\"Generated Classifier Script.
-Runs FinBERT inference on processed_data.csv and writes predictions_test.csv.
-\"\"\"
-
+CLASSIFIER_TEMPLATE = """
 import csv
 import os
 import sys
