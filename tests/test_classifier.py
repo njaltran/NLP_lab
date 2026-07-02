@@ -113,7 +113,11 @@ def test_generated_code_prefers_finetuned_model_when_present(outdir, monkeypatch
     """generate_code points the script at outputs/finbert_finetuned when the dir
     exists, and falls back to the pretrained hub model (MODEL_DIR = None) when
     it doesn't. Template-level check — no model download."""
+    import agents.nadi_classifier as nc
     from agents.nadi_classifier import generate_code
+
+    # Isolate from the repo's real outputs/ (a genuine fine-tuned dir may exist there)
+    monkeypatch.setattr(nc, "OUTPUT_DIR", str(outdir))
 
     # No fine-tuned dir -> fallback
     code_path = outdir / "classifier.py"
