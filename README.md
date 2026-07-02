@@ -48,3 +48,14 @@ Python 3.13, uv-managed. From repo root:
 uv sync
 uv run main.py          # drives the full pipeline
 ```
+
+Sabina's evaluator is deterministic by default. To let Ollama rewrite the
+human-readable evaluator `reason` and `code_notes` fields during a demo, start
+Ollama locally and run:
+
+```bash
+EVALUATOR_USE_OLLAMA=true uv run main.py
+```
+
+Optional knobs: `OLLAMA_URL` (default `http://localhost:11434/api/generate`) and
+`EVALUATOR_OLLAMA_MODEL` (default `llama3.1`).

@@ -1,8 +1,8 @@
-"""Evaluator Agent (Sabina) — score Nadi's predictions and propose next step.
+"""Evaluator agent — score classifier predictions and propose the next step.
 
 Reads Nadi's `predictions_test.csv` and generated `classifier.py`, computes
-classification metrics, reviews the code statically, and writes Jack's input:
-`evaluation_report.json`.
+classification metrics deterministically, asks an LLM to review the classifier
+code and metrics, and writes Jack's input: `evaluation_report.json`.
 
 See docs/data_contracts.md (Handoff 3).
 """
@@ -11,7 +11,8 @@ import csv
 import json
 import os
 import re
-from typing import TypedDict
+import urllib.request
+from typing import Callable, TypedDict
 
 try:
     from agents.base import Agent
@@ -20,11 +21,21 @@ except ModuleNotFoundError:
 
 OUTPUT_DIR = "outputs"
 TARGET_ACCURACY = 0.60
-THRESHOLD_STEP = 0.05    # lower the gate this much per retune so the loop explores
-THRESHOLD_FLOOR = 0.20   # stop here — matches jack_manager.py's _RETUNE_SCHEDULE floor
-DEFAULT_THRESHOLD = 0.5  # assume when classifier.py has no parseable THRESHOLD
-FOCUS_MARGIN = 0.05      # also flag classes within this much of the weakest score
+PROBABILITY_TOLERANCE = 0.02
+DEFAULT_RETUNE_THRESHOLD = 0.50
+THRESHOLD_STEP = 0.05
+THRESHOLD_FLOOR = 0.20
+DEFAULT_MAX_LENGTH = 128
+FOCUS_MARGIN = 0.05
+USE_OLLAMA = os.getenv("EVALUATOR_USE_OLLAMA", "false").lower() == "true"
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
+OLLAMA_MODEL = os.getenv("EVALUATOR_OLLAMA_MODEL", "llama3.1")
+OLLAMA_TIMEOUT_SECONDS = 30
+LLM_TEMPERATURE = 0.2
 LABELS = ("up", "down", "neutral")
+PROPOSAL_FIELDS = {
+    "recommended_action", "reason", "focus_labels", "suggested_params", "code_notes",
+}
 PREDICTION_COLUMNS = [
     "article_id", "date", "ticker", "article_title", "price_t", "price_t1",
     "pct_change", "label", "predicted_label", "confidence",
@@ -62,7 +73,7 @@ def _read_code(path: str) -> str:
 
 
 def validate_predictions(rows: list[dict]) -> None:
-    """Check the parts of Handoff 2 Sabina relies on before scoring."""
+    """Check the Handoff 2 fields needed before scoring."""
     for row in rows:
         article_id = row.get("article_id", "")
         label = row.get("label", "")
@@ -80,14 +91,14 @@ def validate_predictions(rows: list[dict]) -> None:
             raise ValueError(f"{article_id}: confidence must be between 0 and 1")
         if any(prob < 0 or prob > 1 for prob in probs):
             raise ValueError(f"{article_id}: probabilities must be between 0 and 1")
-        if abs(sum(probs) - 1.0) > 0.02:
+        if abs(sum(probs) - 1.0) > PROBABILITY_TOLERANCE:
             raise ValueError(f"{article_id}: prob_* columns must sum to about 1")
-        if abs(confidence - max(probs)) > 0.02:
+        if abs(confidence - max(probs)) > PROBABILITY_TOLERANCE:
             raise ValueError(f"{article_id}: confidence must equal max prob_*")
 
 
 def compute_metrics(rows: list[dict]) -> dict:
-    """Compute overall and per-class accuracy, like Diana's classification checks."""
+    """Compute overall and per-class classification accuracy."""
     total = len(rows)
     wrong = [row for row in rows if row["label"] != row["predicted_label"]]
     class_accuracy = {}
@@ -114,6 +125,35 @@ def _find_assignment(code_text: str, name: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+def _float_assignment(code_text: str, name: str, default: float) -> float:
+    value = _find_assignment(code_text, name)
+    if value is None:
+        return default
+    try:
+        return float(value.strip("\"'"))
+    except ValueError:
+        return default
+
+
+def _int_assignment(code_text: str, name: str, default: int) -> int:
+    value = _find_assignment(code_text, name)
+    if value is None:
+        return default
+    try:
+        return int(float(value.strip("\"'")))
+    except ValueError:
+        return default
+
+
+def _weakest_labels(class_accuracy: dict) -> list[str]:
+    weakest_score = min(class_accuracy.values())
+    return [
+        label_name
+        for label_name, score in class_accuracy.items()
+        if score <= weakest_score + FOCUS_MARGIN
+    ]
+
+
 def review_classifier_code(code_text: str, class_accuracy: dict) -> str:
     """Return concise static observations from Nadi's generated classifier.py."""
     notes = []
@@ -121,31 +161,30 @@ def review_classifier_code(code_text: str, class_accuracy: dict) -> str:
     if threshold is not None:
         notes.append(f"threshold hardcoded at {threshold} in classifier.py")
 
-    weakest_label = min(class_accuracy, key=class_accuracy.get)
-    if weakest_label == "neutral":
+    weakest_labels = _weakest_labels(class_accuracy)
+    if "neutral" in weakest_labels:
         notes.append("the neutral band (+/-1%) may be too narrow for the neutral class")
 
     return "; ".join(notes)
 
 
-def _next_threshold(code_text: str) -> float:
-    """Read the classifier's current THRESHOLD and step it down (floored), so
-    each retune proposes a gate Nadi hasn't run yet instead of a fixed 0.5."""
-    current = _find_assignment(code_text, "THRESHOLD")
-    try:
-        current_val = float(current)
-    except (TypeError, ValueError):
-        current_val = DEFAULT_THRESHOLD
-    return round(max(THRESHOLD_FLOOR, current_val - THRESHOLD_STEP), 2)
+def _suggest_retune_params(code_text: str) -> dict:
+    """Suggest the next deterministic retune step without asking the LLM."""
+    current_threshold = _float_assignment(
+        code_text, "THRESHOLD", DEFAULT_RETUNE_THRESHOLD
+    )
+    next_threshold = max(THRESHOLD_FLOOR, current_threshold - THRESHOLD_STEP)
+    max_length = _int_assignment(code_text, "MAX_LENGTH", DEFAULT_MAX_LENGTH)
+    return {
+        "threshold": round(next_threshold, 2),
+        "max_length": max_length,
+    }
 
 
-def make_proposal(metrics: dict, code_notes: str, code_text: str = "") -> dict:
+def make_base_proposal(metrics: dict, code_text: str, code_notes: str) -> dict:
+    """Create the contract proposal with deterministic action and params."""
     weakest_score = min(metrics["class_accuracy"].values())
-    focus_labels = [
-        label_name
-        for label_name, score in metrics["class_accuracy"].items()
-        if score <= weakest_score + FOCUS_MARGIN
-    ]
+    focus_labels = _weakest_labels(metrics["class_accuracy"])
 
     if metrics["below_threshold"]:
         reason = (
@@ -156,7 +195,7 @@ def make_proposal(metrics: dict, code_notes: str, code_text: str = "") -> dict:
             "recommended_action": "retune",
             "reason": reason,
             "focus_labels": focus_labels,
-            "suggested_params": {"threshold": _next_threshold(code_text), "max_length": 128},
+            "suggested_params": _suggest_retune_params(code_text),
             "code_notes": code_notes,
         }
 
@@ -174,11 +213,194 @@ def make_proposal(metrics: dict, code_notes: str, code_text: str = "") -> dict:
     }
 
 
-def build_report(rows: list[dict], code_text: str) -> dict:
+def validate_proposal(proposal: dict, metrics: dict) -> dict:
+    """Validate Jack's proposal object before it can enter evaluation_report.json."""
+    if not isinstance(proposal, dict):
+        raise ValueError("LLM proposal must be a JSON object")
+
+    missing = PROPOSAL_FIELDS - set(proposal)
+    extra = set(proposal) - PROPOSAL_FIELDS
+    if missing:
+        raise ValueError(f"LLM proposal missing fields: {sorted(missing)}")
+    if extra:
+        raise ValueError(f"LLM proposal has unexpected fields: {sorted(extra)}")
+
+    action = proposal["recommended_action"]
+    if action not in {"retune", "proceed"}:
+        raise ValueError("recommended_action must be retune or proceed")
+
+    expected_action = "retune" if metrics["below_threshold"] else "proceed"
+    if action != expected_action:
+        raise ValueError(
+            "recommended_action conflicts with deterministic threshold gate: "
+            f"expected {expected_action}, got {action}"
+        )
+
+    focus_labels = proposal["focus_labels"]
+    if not isinstance(focus_labels, list) or not focus_labels:
+        raise ValueError("focus_labels must be a non-empty list")
+    invalid_labels = [label for label in focus_labels if label not in LABELS]
+    if invalid_labels:
+        raise ValueError(f"focus_labels contains invalid labels: {invalid_labels}")
+
+    if not isinstance(proposal["suggested_params"], dict):
+        raise ValueError("suggested_params must be an object")
+    if action == "proceed" and proposal["suggested_params"] != {}:
+        raise ValueError("proceed proposals must not carry suggested_params")
+    if action == "retune":
+        params = proposal["suggested_params"]
+        if not {"threshold", "max_length"} <= set(params):
+            raise ValueError("retune proposals need threshold and max_length")
+        if not isinstance(params["threshold"], (int, float)):
+            raise ValueError("threshold must be numeric")
+        if not isinstance(params["max_length"], int):
+            raise ValueError("max_length must be an integer")
+    if not isinstance(proposal["reason"], str) or not proposal["reason"].strip():
+        raise ValueError("reason must be a non-empty string")
+    if not isinstance(proposal["code_notes"], str):
+        raise ValueError("code_notes must be a string")
+
+    return proposal
+
+
+def _extract_json_object(text: str) -> dict:
+    """Parse plain JSON or a fenced JSON object returned by an LLM."""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = re.sub(r"^```(?:json)?\s*", "", stripped, flags=re.I)
+        stripped = re.sub(r"\s*```$", "", stripped)
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", stripped, re.S)
+        if not match:
+            raise
+        return json.loads(match.group(0))
+
+
+def _prompt_metrics(metrics: dict) -> dict:
+    """Small metrics view for the LLM; opaque row ids stay out of the prompt."""
+    return {
+        "accuracy": metrics["accuracy"],
+        "below_threshold": metrics["below_threshold"],
+        "class_accuracy": metrics["class_accuracy"],
+        "misclassified_count": metrics["misclassified_count"],
+    }
+
+
+def _classifier_summary_for_prompt(code_text: str) -> dict:
+    """Summarise source signals instead of sending the whole generated file."""
+    model = _find_assignment(code_text, "MODEL")
+    return {
+        "threshold": _find_assignment(code_text, "THRESHOLD"),
+        "max_length": _find_assignment(code_text, "MAX_LENGTH"),
+        "model": model,
+        "model_dir": _find_assignment(code_text, "MODEL_DIR"),
+        "uses_finbert": "finbert" in code_text.lower(),
+        "maps_sentiment_to_label": "predicted_label" in code_text,
+    }
+
+
+def _build_llm_prompt(metrics: dict, code_text: str, base_proposal: dict) -> str:
+    """Prompt the LLM for judgement text only; control fields are deterministic."""
+    payload = {
+        "metrics": _prompt_metrics(metrics),
+        "classifier_summary": _classifier_summary_for_prompt(code_text),
+        "deterministic_proposal": base_proposal,
+    }
+    return (
+        "You are the evaluator agent in a multi-agent stock-move "
+        "prediction pipeline.\n\n"
+        "Review the deterministic metrics and classifier summary. The action, "
+        "focus labels, and suggested params are already fixed by code and must "
+        "not be changed by you.\n\n"
+        "Return ONLY valid JSON with exactly these two string fields:\n"
+        '{"reason": "...", "code_notes": "..."}\n\n'
+        "Ground your reason in accuracy, target, weakest labels, and any useful "
+        "classifier observation. Do not include markdown or extra keys.\n\n"
+        f"INPUT:\n{json.dumps(payload, indent=2)}"
+    )
+
+
+def _validate_llm_review(review: dict) -> dict:
+    """Accept only the fields the LLM is allowed to write."""
+    if not isinstance(review, dict):
+        raise ValueError("LLM review must be a JSON object")
+    if set(review) != {"reason", "code_notes"}:
+        raise ValueError("LLM review may only contain reason and code_notes")
+    if not isinstance(review["reason"], str) or not review["reason"].strip():
+        raise ValueError("LLM reason must be a non-empty string")
+    if not isinstance(review["code_notes"], str):
+        raise ValueError("LLM code_notes must be a string")
+    return {
+        "reason": review["reason"].strip(),
+        "code_notes": review["code_notes"].strip(),
+    }
+
+
+def _ollama_generate(prompt: str) -> str:
+    """Call local Ollama when explicitly enabled; no API key is needed."""
+    body = json.dumps({
+        "model": OLLAMA_MODEL,
+        "prompt": prompt,
+        "stream": False,
+        "options": {"temperature": LLM_TEMPERATURE},
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        OLLAMA_URL,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=OLLAMA_TIMEOUT_SECONDS) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    return payload.get("response", "")
+
+
+def apply_llm_review(
+    metrics: dict,
+    code_text: str,
+    base_proposal: dict,
+    llm_fn: Callable[[str], str] | None = None,
+) -> dict:
+    """Let an LLM improve reason/code_notes without changing control fields."""
+    if llm_fn is None and not USE_OLLAMA:
+        return base_proposal
+
+    prompt = _build_llm_prompt(metrics, code_text, base_proposal)
+    try:
+        response = (llm_fn or _ollama_generate)(prompt)
+        review = _validate_llm_review(_extract_json_object(response))
+    except (
+        ValueError,
+        json.JSONDecodeError,
+        TimeoutError,
+        OSError,
+    ):
+        return base_proposal
+
+    proposal = {
+        **base_proposal,
+        "reason": review["reason"],
+        "code_notes": review["code_notes"],
+    }
+    return validate_proposal(proposal, metrics)
+
+
+def build_report(
+    rows: list[dict],
+    code_text: str,
+    llm_fn: Callable[[str], str] | None = None,
+) -> dict:
     validate_predictions(rows)
     metrics = compute_metrics(rows)
     code_notes = review_classifier_code(code_text, metrics["class_accuracy"])
-    return {**metrics, "proposal": make_proposal(metrics, code_notes, code_text)}
+    base_proposal = validate_proposal(
+        make_base_proposal(metrics, code_text, code_notes),
+        metrics,
+    )
+    proposal = apply_llm_review(metrics, code_text, base_proposal, llm_fn=llm_fn)
+    return {**metrics, "proposal": proposal}
 
 
 def _write_json(path: str, obj: dict) -> None:
@@ -199,7 +421,10 @@ def evaluate(state: EvaluatorState) -> dict:
 
 
 def write_report(state: EvaluatorState) -> dict:
-    output_path = state.get("output_path") or os.path.join(OUTPUT_DIR, "evaluation_report.json")
+    output_path = state.get("output_path") or os.path.join(
+        OUTPUT_DIR,
+        "evaluation_report.json",
+    )
     _write_json(output_path, state["report"])
     return {"output_path": output_path}
 
@@ -219,7 +444,7 @@ def build_graph(checkpointer):
 
 
 class EvaluatorAgent(Agent):
-    """Sabina's evaluator behind the shared `.run()` interface."""
+    """Evaluator behind the shared `.run()` interface."""
 
     def __init__(self, *, output_dir=OUTPUT_DIR, checkpointer=None, thread_id="evaluator"):
         self._output_dir = output_dir

@@ -1,7 +1,7 @@
-"""Tests for Sabina's Evaluator agent.
+"""Tests for the evaluator agent.
 
-They use simple assert statements so the expectations read like Diana's small
-classroom examples, but they are also pytest-compatible when pytest is present.
+They use simple assert statements and are also pytest-compatible when pytest is
+present.
 """
 
 import csv
@@ -25,7 +25,7 @@ def _load_mock_rows():
 
 
 def test_build_report_matches_mock_data_contract():
-    """Given mock predictions, Sabina should produce Jack's expected report."""
+    """Given mock predictions, the report should match the contract."""
     rows = se._read_predictions(PREDICTIONS)
     code = se._read_code(CLASSIFIER)
 
@@ -57,7 +57,7 @@ def test_build_report_matches_mock_data_contract():
 
 
 def test_report_written_to_evaluation_report_json():
-    """Sabina should write exactly one JSON contract output for Jack."""
+    """The evaluator should write exactly one JSON contract output."""
     rows = se._read_predictions(PREDICTIONS)
     code = se._read_code(CLASSIFIER)
     report = se.build_report(rows, code)
@@ -72,7 +72,7 @@ def test_report_written_to_evaluation_report_json():
 
 
 def test_low_accuracy_recommends_retune():
-    """If accuracy is below 0.60, Sabina should recommend retuning only."""
+    """If accuracy is below 0.60, the proposal should recommend retuning."""
     rows = _load_mock_rows()
     for row in rows:
         row["predicted_label"] = "neutral"
@@ -86,42 +86,32 @@ def test_low_accuracy_recommends_retune():
     assert report["accuracy"] < 0.60
     assert report["below_threshold"] is True
     assert report["proposal"]["recommended_action"] == "retune"
-    # Sabina steps the threshold down from the classifier's current value each
-    # retune so the next pass predicts differently (0.5 - 0.05 = 0.45).
-    assert report["proposal"]["suggested_params"] == {"threshold": 0.45, "max_length": 128}
+    assert report["proposal"]["suggested_params"] == {
+        "threshold": 0.45,
+        "max_length": 128,
+    }
 
 
-def test_retune_threshold_steps_down_from_current():
-    """Each retune reads the classifier's current THRESHOLD and lowers it by one
-    step, so the loop explores instead of re-running identical params."""
-    rows = _load_mock_rows()
-    for row in rows:
-        row["predicted_label"] = "neutral"
-        row["confidence"] = "0.90"
-        row["prob_up"] = "0.05"
-        row["prob_down"] = "0.05"
-        row["prob_neutral"] = "0.90"
-
-    report = se.build_report(rows, "THRESHOLD = 0.45\nMAX_LENGTH = 128\n")
-    assert report["proposal"]["suggested_params"]["threshold"] == 0.4
+def test_focus_labels_include_near_weakest_classes():
+    """The proposal should focus all labels within FOCUS_MARGIN of the weakest."""
+    assert se._weakest_labels({"up": 0.30, "down": 0.28, "neutral": 0.45}) == [
+        "up",
+        "down",
+    ]
 
 
-def test_retune_threshold_floors():
-    """The step-down stops at the floor so it never proposes a degenerate gate."""
-    rows = _load_mock_rows()
-    for row in rows:
-        row["predicted_label"] = "neutral"
-        row["confidence"] = "0.90"
-        row["prob_up"] = "0.05"
-        row["prob_down"] = "0.05"
-        row["prob_neutral"] = "0.90"
+def test_classifier_summary_uses_generated_model_constant():
+    """Nadi's generated classifier exposes MODEL/MODEL_DIR, not MODEL_NAME."""
+    summary = se._classifier_summary_for_prompt(
+        'MODEL = "ProsusAI/finbert"\nMODEL_DIR = "outputs/model"\n'
+    )
 
-    report = se.build_report(rows, "THRESHOLD = 0.20\nMAX_LENGTH = 128\n")
-    assert report["proposal"]["suggested_params"]["threshold"] == 0.20
+    assert summary["model"] == '"ProsusAI/finbert"'
+    assert summary["model_dir"] == '"outputs/model"'
 
 
 def test_validation_rejects_non_test_rows():
-    """Sabina should reject rows that are not from the test split."""
+    """Rows outside the test split should be rejected."""
     rows = _load_mock_rows()
     rows[0]["split"] = "train"
 
@@ -133,9 +123,115 @@ def test_validation_rejects_non_test_rows():
         assert False, "Expected validate_predictions to reject train split rows"
 
 
+def test_llm_review_can_supply_valid_judgment_text():
+    """A valid LLM review should update reason/code_notes only."""
+    rows = se._read_predictions(PREDICTIONS)
+    code = se._read_code(CLASSIFIER)
+
+    def fake_llm(prompt):
+        assert "misclassified_ids" not in prompt
+        assert "classifier_summary" in prompt
+        return json.dumps({
+            "reason": "accuracy clears the target; neutral remains weakest",
+            "code_notes": "threshold is fixed at 0.5 and neutral remains weak",
+        })
+
+    report = se.build_report(rows, code, llm_fn=fake_llm)
+
+    assert (
+        report["proposal"]["reason"]
+        == "accuracy clears the target; neutral remains weakest"
+    )
+    assert (
+        report["proposal"]["code_notes"]
+        == "threshold is fixed at 0.5 and neutral remains weak"
+    )
+    assert report["proposal"]["recommended_action"] == "proceed"
+    assert report["proposal"]["focus_labels"] == ["neutral"]
+    assert report["proposal"]["suggested_params"] == {}
+
+
+def test_llm_review_cannot_change_control_fields():
+    """If the LLM returns proposal fields, the review should be ignored."""
+    rows = se._read_predictions(PREDICTIONS)
+    code = se._read_code(CLASSIFIER)
+
+    def bad_llm(prompt):
+        return json.dumps({
+            "recommended_action": "retune",
+            "reason": "I feel like retuning anyway",
+            "focus_labels": ["neutral"],
+            "suggested_params": {"threshold": 0.5},
+            "code_notes": "try to override the gate",
+        })
+
+    report = se.build_report(rows, code, llm_fn=bad_llm)
+
+    assert report["below_threshold"] is False
+    assert report["proposal"]["recommended_action"] == "proceed"
+    assert report["proposal"]["suggested_params"] == {}
+    assert report["proposal"]["reason"].startswith("accuracy 0.67 clears")
+
+
+def test_fenced_json_review_can_be_parsed_and_applied():
+    """LLM JSON wrapped in markdown fences should still be accepted."""
+    rows = se._read_predictions(PREDICTIONS)
+    metrics = se.compute_metrics(rows)
+    base = se.make_base_proposal(metrics, se._read_code(CLASSIFIER), "static notes")
+    text = """```json
+{
+  "reason": "accuracy clears the target",
+  "code_notes": "threshold hardcoded"
+}
+```"""
+
+    proposal = se.apply_llm_review(
+        metrics,
+        "THRESHOLD = 0.5\n",
+        base,
+        llm_fn=lambda _: text,
+    )
+
+    assert proposal["recommended_action"] == "proceed"
+    assert proposal["focus_labels"] == ["neutral"]
+    assert proposal["suggested_params"] == {}
+    assert proposal["reason"] == "accuracy clears the target"
+
+
+def test_invalid_llm_json_falls_back_to_base_proposal():
+    """Malformed LLM text should not stop evaluation_report.json from existing."""
+    rows = se._read_predictions(PREDICTIONS)
+    code = se._read_code(CLASSIFIER)
+
+    report = se.build_report(rows, code, llm_fn=lambda _: "Here is my answer: proceed")
+
+    assert report["proposal"]["recommended_action"] == "proceed"
+    assert report["proposal"]["reason"].startswith("accuracy 0.67 clears")
+
+
+def test_prompt_excludes_misclassified_ids_and_full_source():
+    """The LLM prompt should stay small and avoid opaque row ids."""
+    rows = se._read_predictions(PREDICTIONS)
+    metrics = se.compute_metrics(rows)
+    code = "THRESHOLD = 0.5\nMAX_LENGTH = 128\n# lots of generated source\n"
+    base = se.make_base_proposal(metrics, code, "static notes")
+
+    prompt = se._build_llm_prompt(metrics, code, base)
+
+    assert "misclassified_ids" not in prompt
+    assert "FNSPID_00006" not in prompt
+    assert "classifier_summary" in prompt
+    assert "# lots of generated source" not in prompt
+
+
 if __name__ == "__main__":
     test_build_report_matches_mock_data_contract()
     test_report_written_to_evaluation_report_json()
     test_low_accuracy_recommends_retune()
     test_validation_rejects_non_test_rows()
-    print("Sabina evaluator tests passed")
+    test_llm_review_can_supply_valid_judgment_text()
+    test_llm_review_cannot_change_control_fields()
+    test_fenced_json_review_can_be_parsed_and_applied()
+    test_invalid_llm_json_falls_back_to_base_proposal()
+    test_prompt_excludes_misclassified_ids_and_full_source()
+    print("Evaluator tests passed")
