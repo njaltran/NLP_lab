@@ -120,6 +120,24 @@ def test_retune_threshold_floors():
     assert report["proposal"]["suggested_params"]["threshold"] == 0.20
 
 
+def test_focus_labels_include_near_weakest_classes():
+    """Sabina should focus all labels within FOCUS_MARGIN of the weakest score."""
+    assert se._weakest_labels({"up": 0.30, "down": 0.28, "neutral": 0.45}) == [
+        "up",
+        "down",
+    ]
+
+
+def test_classifier_summary_uses_generated_model_constant():
+    """Nadi's generated classifier exposes MODEL/MODEL_DIR, not MODEL_NAME."""
+    summary = se._classifier_summary_for_prompt(
+        'MODEL = "ProsusAI/finbert"\nMODEL_DIR = "outputs/model"\n'
+    )
+
+    assert summary["model"] == '"ProsusAI/finbert"'
+    assert summary["model_dir"] == '"outputs/model"'
+
+
 def test_validation_rejects_non_test_rows():
     """Sabina should reject rows that are not from the test split."""
     rows = _load_mock_rows()
