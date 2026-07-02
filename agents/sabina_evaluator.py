@@ -21,7 +21,7 @@ except ModuleNotFoundError:
 OUTPUT_DIR = "outputs"
 TARGET_ACCURACY = 0.60
 THRESHOLD_STEP = 0.05    # lower the gate this much per retune so the loop explores
-THRESHOLD_FLOOR = 0.35   # stop here — below this the gate barely forces neutral
+THRESHOLD_FLOOR = 0.20   # stop here — matches jack_manager.py's _RETUNE_SCHEDULE floor
 DEFAULT_THRESHOLD = 0.5  # assume when classifier.py has no parseable THRESHOLD
 FOCUS_MARGIN = 0.05      # also flag classes within this much of the weakest score
 LABELS = ("up", "down", "neutral")

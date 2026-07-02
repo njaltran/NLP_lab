@@ -116,8 +116,8 @@ def test_retune_threshold_floors():
         row["prob_down"] = "0.05"
         row["prob_neutral"] = "0.90"
 
-    report = se.build_report(rows, "THRESHOLD = 0.35\nMAX_LENGTH = 128\n")
-    assert report["proposal"]["suggested_params"]["threshold"] == 0.35
+    report = se.build_report(rows, "THRESHOLD = 0.20\nMAX_LENGTH = 128\n")
+    assert report["proposal"]["suggested_params"]["threshold"] == 0.20
 
 
 def test_validation_rejects_non_test_rows():
