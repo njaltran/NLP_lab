@@ -303,7 +303,10 @@ def _misclassified_sample(
             "headline": row["article_title"],
             "true_label": row["label"],
             "predicted_label": row["predicted_label"],
-            "confidence": row["confidence"],
+            "confidence": float(row["confidence"]),
+            "prob_up": float(row["prob_up"]),
+            "prob_down": float(row["prob_down"]),
+            "prob_neutral": float(row["prob_neutral"]),
         })
         if len(sample) >= limit:
             break

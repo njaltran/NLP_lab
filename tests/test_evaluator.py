@@ -165,6 +165,9 @@ def test_llm_review_can_supply_valid_judgment_text():
         assert "headline" in prompt
         assert "true_label" in prompt
         assert "predicted_label" in prompt
+        assert "prob_up" in prompt
+        assert "prob_down" in prompt
+        assert "prob_neutral" in prompt
         return json.dumps({
             "reason": "accuracy clears the target; neutral remains weakest",
             "code_notes": "threshold is fixed at 0.5 and neutral remains weak",
@@ -278,6 +281,9 @@ def test_misclassified_sample_is_limited_and_excludes_ids():
         "true_label",
         "predicted_label",
         "confidence",
+        "prob_up",
+        "prob_down",
+        "prob_neutral",
     }
     assert "article_id" not in sample[0]
 
