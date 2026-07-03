@@ -161,6 +161,10 @@ def test_llm_review_can_supply_valid_judgment_text():
     def fake_llm(prompt):
         assert "misclassified_ids" not in prompt
         assert "classifier_summary" in prompt
+        assert "misclassified_sample" in prompt
+        assert "headline" in prompt
+        assert "true_label" in prompt
+        assert "predicted_label" in prompt
         return json.dumps({
             "reason": "accuracy clears the target; neutral remains weakest",
             "code_notes": "threshold is fixed at 0.5 and neutral remains weak",
@@ -219,6 +223,7 @@ def test_fenced_json_review_can_be_parsed_and_applied():
         metrics,
         "THRESHOLD = 0.5\n",
         base,
+        se._misclassified_sample(rows),
         llm_fn=lambda _: text,
     )
 
@@ -240,18 +245,41 @@ def test_invalid_llm_json_falls_back_to_base_proposal():
 
 
 def test_prompt_excludes_misclassified_ids_and_full_source():
-    """The LLM prompt should stay small and avoid opaque row ids."""
+    """The LLM prompt should stay small while showing failure patterns."""
     rows = se._read_predictions(PREDICTIONS)
     metrics = se.compute_metrics(rows)
     code = "THRESHOLD = 0.5\nMAX_LENGTH = 128\n# lots of generated source\n"
     base = se.make_base_proposal(metrics, code, "static notes")
 
-    prompt = se._build_llm_prompt(metrics, code, base)
+    failure_sample = se._misclassified_sample(rows)
+    prompt = se._build_llm_prompt(metrics, code, base, failure_sample)
 
     assert "misclassified_ids" not in prompt
     assert "FNSPID_00006" not in prompt
+    assert "misclassified_sample" in prompt
+    assert "headline" in prompt
+    assert "true_label" in prompt
+    assert "predicted_label" in prompt
     assert "classifier_summary" in prompt
     assert "# lots of generated source" not in prompt
+
+
+def test_misclassified_sample_is_limited_and_excludes_ids():
+    """The LLM gets representative failures, not the full opaque id list."""
+    rows = _load_mock_rows() * 10
+    for row in rows:
+        row["predicted_label"] = "neutral"
+
+    sample = se._misclassified_sample(rows)
+
+    assert len(sample) == se.MISCLASSIFIED_SAMPLE_SIZE
+    assert set(sample[0]) == {
+        "headline",
+        "true_label",
+        "predicted_label",
+        "confidence",
+    }
+    assert "article_id" not in sample[0]
 
 
 if __name__ == "__main__":
@@ -264,4 +292,5 @@ if __name__ == "__main__":
     test_fenced_json_review_can_be_parsed_and_applied()
     test_invalid_llm_json_falls_back_to_base_proposal()
     test_prompt_excludes_misclassified_ids_and_full_source()
+    test_misclassified_sample_is_limited_and_excludes_ids()
     print("Evaluator tests passed")

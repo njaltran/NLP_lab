@@ -27,11 +27,13 @@ THRESHOLD_STEP = 0.05
 THRESHOLD_FLOOR = 0.20
 DEFAULT_MAX_LENGTH = 128
 FOCUS_MARGIN = 0.05
+# Read once at import time so tests and demos get stable evaluator behavior.
 USE_OLLAMA = os.getenv("EVALUATOR_USE_OLLAMA", "false").lower() == "true"
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
 OLLAMA_MODEL = os.getenv("EVALUATOR_OLLAMA_MODEL", "llama3.1")
 OLLAMA_TIMEOUT_SECONDS = 30
 LLM_TEMPERATURE = 0.2
+MISCLASSIFIED_SAMPLE_SIZE = 25
 LABELS = ("up", "down", "neutral")
 PROPOSAL_FIELDS = {
     "recommended_action", "reason", "focus_labels", "suggested_params", "code_notes",
@@ -288,6 +290,26 @@ def _prompt_metrics(metrics: dict) -> dict:
     }
 
 
+def _misclassified_sample(
+    rows: list[dict],
+    limit: int = MISCLASSIFIED_SAMPLE_SIZE,
+) -> list[dict]:
+    """Small failure sample for LLM pattern analysis; row ids stay out."""
+    sample = []
+    for row in rows:
+        if row["label"] == row["predicted_label"]:
+            continue
+        sample.append({
+            "headline": row["article_title"],
+            "true_label": row["label"],
+            "predicted_label": row["predicted_label"],
+            "confidence": row["confidence"],
+        })
+        if len(sample) >= limit:
+            break
+    return sample
+
+
 def _classifier_summary_for_prompt(code_text: str) -> dict:
     """Summarise source signals instead of sending the whole generated file."""
     model = _find_assignment(code_text, "MODEL")
@@ -301,11 +323,17 @@ def _classifier_summary_for_prompt(code_text: str) -> dict:
     }
 
 
-def _build_llm_prompt(metrics: dict, code_text: str, base_proposal: dict) -> str:
+def _build_llm_prompt(
+    metrics: dict,
+    code_text: str,
+    base_proposal: dict,
+    failure_sample: list[dict],
+) -> str:
     """Prompt the LLM for judgement text only; control fields are deterministic."""
     payload = {
         "metrics": _prompt_metrics(metrics),
         "classifier_summary": _classifier_summary_for_prompt(code_text),
+        "misclassified_sample": failure_sample,
         "deterministic_proposal": base_proposal,
     }
     return (
@@ -317,7 +345,8 @@ def _build_llm_prompt(metrics: dict, code_text: str, base_proposal: dict) -> str
         "Return ONLY valid JSON with exactly these two string fields:\n"
         '{"reason": "...", "code_notes": "..."}\n\n'
         "Ground your reason in accuracy, target, weakest labels, and any useful "
-        "classifier observation. Do not include markdown or extra keys.\n\n"
+        "classifier observation. Use the misclassified sample to describe the "
+        "failure pattern when possible. Do not include markdown or extra keys.\n\n"
         f"INPUT:\n{json.dumps(payload, indent=2)}"
     )
 
@@ -361,13 +390,14 @@ def apply_llm_review(
     metrics: dict,
     code_text: str,
     base_proposal: dict,
+    failure_sample: list[dict],
     llm_fn: Callable[[str], str] | None = None,
 ) -> dict:
     """Let an LLM improve reason/code_notes without changing control fields."""
     if llm_fn is None and not USE_OLLAMA:
         return base_proposal
 
-    prompt = _build_llm_prompt(metrics, code_text, base_proposal)
+    prompt = _build_llm_prompt(metrics, code_text, base_proposal, failure_sample)
     try:
         response = (llm_fn or _ollama_generate)(prompt)
         review = _validate_llm_review(_extract_json_object(response))
@@ -376,7 +406,8 @@ def apply_llm_review(
         json.JSONDecodeError,
         TimeoutError,
         OSError,
-    ):
+    ) as error:
+        print(f"[sabina] LLM review failed ({error}); using deterministic fallback.")
         return base_proposal
 
     proposal = {
@@ -399,7 +430,14 @@ def build_report(
         make_base_proposal(metrics, code_text, code_notes),
         metrics,
     )
-    proposal = apply_llm_review(metrics, code_text, base_proposal, llm_fn=llm_fn)
+    failure_sample = _misclassified_sample(rows)
+    proposal = apply_llm_review(
+        metrics,
+        code_text,
+        base_proposal,
+        failure_sample,
+        llm_fn=llm_fn,
+    )
     return {**metrics, "proposal": proposal}
 
 
