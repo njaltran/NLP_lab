@@ -90,11 +90,18 @@ def main(src: str, dst: str) -> None:
     if not rows:
         raise ValueError("Source file is empty")
         
-    out_cols = list(rows[0].keys()) + [
+    # Predict only the held-out test rows; the train rows were used to fit the
+    # model, so scoring them would leak. No split column -> treat all as test.
+    if "split" in rows[0]:
+        rows = [r for r in rows if r["split"] == "test"]
+        if not rows:
+            raise ValueError("No split=test rows in input")
+
+    out_cols = [c for c in rows[0].keys() if c != "split"] + [
         "predicted_label", "confidence", "prob_up", "prob_down", "prob_neutral", "split"
     ]
     
-    # Process all rows and mark them as test split
+    # Predict each test row (rows already filtered to split=="test" above).
     for row in rows:
         pred_data = classify(row["article_title"])
         row.update(pred_data)

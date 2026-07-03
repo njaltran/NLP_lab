@@ -24,6 +24,9 @@ Built by joining FNSPID headlines to yfinance prices on `ticker` + publication d
 | price_t1 | float | 125.12 | closing price on next trading day (from yfinance) |
 | pct_change | float | 3.38 | percentage change T to T+1 |
 | label | string | up | >+1% = up, <-1% = down, in between = neutral |
+| split | string | train | time-based train/test split assigned by Aurora: earliest 80% of dates = `train`, the rest = `test`. Date-based (not random) so no future information leaks into training. Nadi trains on `split=train` rows and predicts `split=test` rows only |
+
+**Train/test split.** The `split` column marks each row `train` or `test` by date — the earliest 80% of dates are `train`, the rest `test`. Aurora only *labels* the split (one file, one column); the classifier *uses* it (train on train rows, predict test rows). Optionally, a `dataset_end` date drops later rows before splitting — the production run uses `2019-12-31` so the COVID crash (a structural break) stays out of the test window and held-out accuracy reflects the normal regime.
 
 ## Handoff 2 — Classifier Agent (Nadi) → Evaluator Agent (Sabina)
 
