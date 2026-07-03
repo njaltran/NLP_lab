@@ -49,9 +49,9 @@ uv sync
 uv run main.py          # drives the full pipeline
 ```
 
-Sabina's evaluator is deterministic by default. To let Ollama rewrite the
-human-readable evaluator `reason` and `code_notes` fields during a demo, start
-Ollama locally and run:
+Sabina's evaluator is deterministic by default. To let Ollama review a small
+misclassified-row sample and write the human-readable evaluator `reason` and
+`code_notes` fields during a demo, start Ollama locally and run:
 
 ```bash
 EVALUATOR_USE_OLLAMA=true uv run main.py
