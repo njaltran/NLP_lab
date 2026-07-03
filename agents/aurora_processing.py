@@ -134,13 +134,14 @@ def processing_node(state: PipelineState) -> dict:
     df = df.dropna(subset=["label"]).reset_index(drop=True)
     print(f"  Dropped {before - len(df):,} rows with no price data. Final: {len(df):,} rows")
 
-    # 5. Drop outliers (IQR 1.5×)
-    q1, q3 = df["pct_change"].quantile(0.25), df["pct_change"].quantile(0.75)
-    iqr = q3 - q1
+    # 5. Drop outliers (1st–99th percentile).
+    # IQR 1.5× was cutting ~10% of data because stock returns are fat-tailed;
+    # percentile fences keep exactly 98% of rows regardless of distribution shape.
+    lo, hi = df["pct_change"].quantile(0.01), df["pct_change"].quantile(0.99)
     before_outliers = len(df)
     df = df[
-        (df["pct_change"] >= q1 - 1.5 * iqr) &
-        (df["pct_change"] <= q3 + 1.5 * iqr)
+        (df["pct_change"] >= lo) &
+        (df["pct_change"] <= hi)
     ].reset_index(drop=True)
     print(f"  Outliers dropped: {before_outliers - len(df):,}. Final: {len(df):,} rows")
 

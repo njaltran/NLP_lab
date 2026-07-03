@@ -8,6 +8,7 @@ import pytest
 import pandas as pd
 import importlib.util
 import socket
+from unittest.mock import patch
 from agents.nadi_classifier import ClassifierAgent, generate_code
 
 PROCESSED_DATA = "mock_data/processed_data.csv"
@@ -40,6 +41,8 @@ def _check_torch_and_model():
 _CAN_RUN_INFERENCE, _REASON = _check_torch_and_model()
 skip_inference = pytest.mark.skipif(not _CAN_RUN_INFERENCE, reason=_REASON)
 
+# --- Offline Code Generation Tests ---
+
 def test_classifier_code_generation_default(outdir):
     """Test default code generation (offline)."""
     code_path = outdir / "classifier.py"
@@ -56,20 +59,18 @@ def test_classifier_code_generation_default(outdir):
         assert "MAX_LENGTH = 128" in content
         assert "FOCUS_LABELS = []" in content
 
-def test_classifier_agent_retune(outdir):
+def test_classifier_code_generation_retune(outdir):
     """Test code generation with retune parameters (offline)."""
     code_path = outdir / "classifier.py"
-    retune_path = outdir / "retune_request.json"
 
     retune_data = {
         "suggested_params": {
             "threshold": 0.65,
-            "max_length": 64
+            "max_length": 64,
+            "boost_factor": 1.5
         },
         "focus_labels": ["down"]
     }
-    with open(retune_path, "w", encoding="utf-8") as f:
-        json.dump(retune_data, f)
 
     state = {
         "classifier_code_path": str(code_path),
@@ -81,6 +82,7 @@ def test_classifier_agent_retune(outdir):
     assert res["classifier_metadata"]["fine_tuning_params"]["threshold"] == 0.65
     assert res["classifier_metadata"]["fine_tuning_params"]["max_length"] == 64
     assert res["classifier_metadata"]["fine_tuning_params"]["focus_labels"] == ["down"]
+    assert res["classifier_metadata"]["fine_tuning_params"]["boost_factor"] == 1.5
 
     # Verify classifier.py was updated with new values
     with open(res["classifier_code_path"], "r", encoding="utf-8") as f:
@@ -88,6 +90,9 @@ def test_classifier_agent_retune(outdir):
         assert "THRESHOLD = 0.65" in content
         assert "MAX_LENGTH = 64" in content
         assert "FOCUS_LABELS = ['down']" in content
+        assert "BOOST_FACTOR = 1.5" in content
+
+# --- Online Inference Agent Tests ---
 
 @skip_inference
 def test_classifier_agent_run(outdir):
@@ -117,6 +122,75 @@ def test_classifier_agent_run(outdir):
         
     assert (df["split"] == "test").all()
     assert set(df["predicted_label"]) <= {"up", "down", "neutral"}
+
+@skip_inference
+def test_classifier_agent_retune(outdir):
+    """Test code generation and execution with retune parameters (requires torch & model/network)."""
+    code_path = outdir / "classifier.py"
+    pred_path = outdir / "predictions_test.csv"
+    retune_path = outdir / "retune_request.json"
+
+    retune_data = {
+        "iteration": 1,
+        "suggested_params": {
+            "threshold": 0.65,
+            "max_length": 64,
+            "boost_factor": 1.5
+        },
+        "focus_labels": ["down"]
+    }
+    with open(retune_path, "w", encoding="utf-8") as f:
+        json.dump(retune_data, f)
+
+    agent = ClassifierAgent()
+    res = agent.run(
+        processed_data=PROCESSED_DATA,
+        classifier_code=str(code_path),
+        predictions=str(pred_path),
+        retune_request=str(retune_path)
+    )
+
+    # Check metadata in state
+    assert res["classifier_metadata"]["fine_tuning_params"]["threshold"] == 0.65
+    assert res["classifier_metadata"]["fine_tuning_params"]["max_length"] == 64
+    assert res["classifier_metadata"]["fine_tuning_params"]["focus_labels"] == ["down"]
+    assert res["classifier_metadata"]["fine_tuning_params"]["boost_factor"] == 1.5
+
+    # Verify classifier.py was updated with new values
+    with open(res["classifier_code_path"], "r", encoding="utf-8") as f:
+        content = f.read()
+        assert "THRESHOLD = 0.65" in content
+        assert "MAX_LENGTH = 64" in content
+        assert "FOCUS_LABELS = ['down']" in content
+        assert "BOOST_FACTOR = 1.5" in content
+
+    # Verify this iteration's code was archived, named by retune_request's iteration
+    assert res["classifier_history_path"].endswith("classifier_iter1.py")
+    with open(res["classifier_history_path"], "r", encoding="utf-8") as f:
+        assert f.read() == content
+
+@skip_inference
+def test_classifier_archives_each_iteration_separately(outdir):
+    """Past retune attempts must survive classifier.py being overwritten (requires torch & model/network)."""
+    code_path = outdir / "classifier.py"
+    pred_path = outdir / "predictions_test.csv"
+    agent = ClassifierAgent()
+
+    first = agent.run(processed_data=PROCESSED_DATA, classifier_code=str(code_path),
+                      predictions=str(pred_path))
+    assert first["classifier_history_path"].endswith("classifier_iter0.py")
+
+    retune_path = outdir / "retune_request.json"
+    with open(retune_path, "w", encoding="utf-8") as f:
+        json.dump({"iteration": 1, "suggested_params": {"threshold": 0.4}}, f)
+    second = agent.run(processed_data=PROCESSED_DATA, classifier_code=str(code_path),
+                       predictions=str(pred_path), retune_request=str(retune_path))
+    assert second["classifier_history_path"].endswith("classifier_iter1.py")
+
+    # Both archived copies exist even though classifier.py itself was overwritten.
+    assert os.path.exists(first["classifier_history_path"])
+    assert os.path.exists(second["classifier_history_path"])
+    assert first["classifier_history_path"] != second["classifier_history_path"]
 
 @skip_inference
 def test_classifier_to_evaluator_integration(outdir):
@@ -153,10 +227,10 @@ def test_classifier_to_evaluator_integration(outdir):
     assert "proposal" in report
     assert report["proposal"]["recommended_action"] in ["retune", "proceed"]
 
+# --- Offline Subprocess Patching Tests ---
 
 def test_classifier_agent_run_missing_retune_request(outdir):
     """Test that a missing retune_request prints a warning and sets 'no retune applied' in state."""
-    from unittest.mock import patch
     code_path = outdir / "classifier.py"
     pred_path = outdir / "predictions_test.csv"
     retune_path = outdir / "nonexistent_retune_request.json"
@@ -172,10 +246,8 @@ def test_classifier_agent_run_missing_retune_request(outdir):
         assert mock_run.called
         assert res.get("retune_request") == "no retune applied"
 
-
 def test_classifier_agent_run_malformed_retune_request(outdir):
     """Test that a malformed retune_request JSON raises an exception."""
-    from unittest.mock import patch
     code_path = outdir / "classifier.py"
     pred_path = outdir / "predictions_test.csv"
     retune_path = outdir / "malformed_retune_request.json"

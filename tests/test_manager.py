@@ -147,6 +147,86 @@ def test_manager_agent_run_lifecycle(outdir, tmp_path, proceed_report):
     assert (outdir / "final_report.json").exists()
 
 
+# --- convergence + adaptive retune (Increment 1) --------------------------
+
+def _report(accuracy):
+    """Minimal below/above-target report with a retune proposal."""
+    return {
+        "accuracy": accuracy,
+        "proposal": {"recommended_action": "retune" if accuracy < 0.60 else "proceed",
+                     "focus_labels": ["down"],
+                     "suggested_params": {"threshold": 0.5, "max_length": 128}},
+    }
+
+
+def test_convergence_proceeds_before_cap_when_accuracy_flat():
+    """A flat accuracy trend should trip early-stop and proceed, even though the
+    iteration cap (5) has not been reached and accuracy is below target."""
+    g, cfg = _graph(), {"configurable": {"thread_id": "conv"}}
+    base = {"target_accuracy": 0.60, "max_iterations": 5, "patience": 2, "min_delta": 0.01,
+            "predictions_path": PRED}
+    actions = [g.invoke({**base, "evaluation_report": _report(0.37)}, cfg)["final_action"]
+               for _ in range(4)]
+    # it1 retune, it2 retune (history too short), it3 converged -> proceed.
+    assert actions[0] == "retune" and actions[1] == "retune"
+    assert actions[2] == "proceed"
+
+
+def test_retune_params_adapt_and_do_not_repeat():
+    """Consecutive retunes must escalate: after the first (which accepts Sabina's
+    proposal), each retune picks a fresh, previously-unused param set."""
+    g, cfg = _graph(), {"configurable": {"thread_id": "adapt"}}
+    base = {"target_accuracy": 0.60, "max_iterations": 9, "patience": 99, "min_delta": 0.0,
+            "predictions_path": PRED}
+    seen = [g.invoke({**base, "evaluation_report": _report(0.37)}, cfg)["tried_params"][-1]
+            for _ in range(4)]
+    assert len(seen) == 4
+    # no two consecutive retunes used the same params
+    assert all(seen[i] != seen[i + 1] for i in range(len(seen) - 1))
+    assert {"threshold", "max_length"} <= set(seen[-1])
+
+
+def test_second_retune_skips_schedule_entry_matching_sabinas_proposal():
+    """Regression (2026-07-02 run): Sabina's accepted first-retune proposal
+    {threshold: 0.45, max_length: 128} lacks the schedule's boost_factor key, so
+    plain dict equality treated schedule entry 0 (same threshold/max_length) as
+    untried and the second retune regenerated an identical classifier. Matching
+    must compare shared keys only."""
+    g, cfg = _graph(), {"configurable": {"thread_id": "shared-keys"}}
+    base = {"target_accuracy": 0.60, "max_iterations": 9, "patience": 99, "min_delta": 0.0,
+            "predictions_path": PRED}
+    report = _report(0.37)
+    report["proposal"]["suggested_params"] = {"threshold": 0.45, "max_length": 128}
+
+    first = g.invoke({**base, "evaluation_report": report}, cfg)["tried_params"][-1]
+    second = g.invoke({**base, "evaluation_report": report}, cfg)["tried_params"][-1]
+    assert first == {"threshold": 0.45, "max_length": 128}
+    # second retune must not re-run the same threshold/max_length combination
+    assert (second["threshold"], second["max_length"]) != (0.45, 128)
+
+
+def test_accuracy_history_accumulates_one_per_iteration():
+    g, cfg = _graph(), {"configurable": {"thread_id": "hist"}}
+    base = {"target_accuracy": 0.60, "max_iterations": 9, "patience": 99, "min_delta": 0.0,
+            "predictions_path": PRED}
+    g.invoke({**base, "evaluation_report": _report(0.30)}, cfg)
+    g.invoke({**base, "evaluation_report": _report(0.40)}, cfg)
+    out = g.invoke({**base, "evaluation_report": _report(0.50)}, cfg)
+    assert out["accuracy_history"] == [0.30, 0.40, 0.50]
+
+
+def test_decision_json_carries_accuracy_history(outdir):
+    """decision.json is overwritten every iteration, so accuracy_history is the
+    only on-disk record of the trend — verify it lands in the written file."""
+    g, cfg = _graph(), {"configurable": {"thread_id": "hist-disk"}}
+    base = {"target_accuracy": 0.60, "max_iterations": 9, "patience": 99, "min_delta": 0.0,
+            "predictions_path": PRED}
+    g.invoke({**base, "evaluation_report": _report(0.30)}, cfg)
+    g.invoke({**base, "evaluation_report": _report(0.40)}, cfg)
+    decision = json.loads((outdir / "decision.json").read_text())
+    assert decision["accuracy_history"] == [0.30, 0.40]
+
+
 # --- reproducible sampling ------------------------------------------------
 
 def test_sampling_is_reproducible(outdir):

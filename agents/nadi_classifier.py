@@ -24,10 +24,7 @@ except ModuleNotFoundError:
 
 OUTPUT_DIR = "outputs"
 
-CLASSIFIER_TEMPLATE = """\"\"\"Generated Classifier Script.
-Runs FinBERT inference on processed_data.csv and writes predictions_test.csv.
-\"\"\"
-
+CLASSIFIER_TEMPLATE = """
 import csv
 import os
 import sys
@@ -38,10 +35,15 @@ MODEL = "ProsusAI/finbert"
 MAX_LENGTH = {max_length}
 THRESHOLD = {threshold}
 FOCUS_LABELS = {focus_labels}
+BOOST_FACTOR = {boost_factor}
 SENTIMENT_TO_LABEL = {{"positive": "up", "negative": "down", "neutral": "neutral"}}
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL)
-model = AutoModelForSequenceClassification.from_pretrained(MODEL)
+# Authenticate to the HF Hub when a token is in the env (higher rate limits,
+# faster downloads); fall back to unauthenticated access when it is absent.
+HF_TOKEN = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL, token=HF_TOKEN)
+model = AutoModelForSequenceClassification.from_pretrained(MODEL, token=HF_TOKEN)
 model.eval()
 
 ID2OURS = {{i: SENTIMENT_TO_LABEL[model.config.id2label[i].lower()] for i in model.config.id2label}}
@@ -57,7 +59,7 @@ def classify(title: str) -> dict:
     # Apply class boost to focus labels if specified
     for fl in FOCUS_LABELS:
         if fl in by_label:
-            by_label[fl] *= 1.25
+            by_label[fl] *= BOOST_FACTOR
             
     # Normalize probabilities after boosting
     total_prob = sum(by_label.values())
@@ -115,6 +117,7 @@ def generate_code(state: PipelineState) -> dict:
     threshold = 0.5
     max_length = 128
     focus_labels = []
+    boost_factor = 1.25
 
     # Read from retune request if it exists in state
     retune_req = state.get("retune_request")
@@ -122,6 +125,7 @@ def generate_code(state: PipelineState) -> dict:
         suggested = retune_req.get("suggested_params", {})
         threshold = suggested.get("threshold", threshold)
         max_length = suggested.get("max_length", max_length)
+        boost_factor = suggested.get("boost_factor", boost_factor)
         focus_labels = retune_req.get("focus_labels", focus_labels)
 
     code_path = state.get("classifier_code_path") or os.path.join(OUTPUT_DIR, "classifier.py")
@@ -130,7 +134,8 @@ def generate_code(state: PipelineState) -> dict:
     formatted_code = CLASSIFIER_TEMPLATE.format(
         threshold=threshold,
         max_length=max_length,
-        focus_labels=repr(focus_labels)
+        focus_labels=repr(focus_labels),
+        boost_factor=boost_factor
     )
 
     with open(code_path, "w", encoding="utf-8") as f:
@@ -138,17 +143,29 @@ def generate_code(state: PipelineState) -> dict:
 
     print(f"[nadi] Generated classifier code at: {code_path}")
 
+    # Keep a per-iteration copy so past retune attempts aren't lost when
+    # classifier.py (the single contract file Sabina reads) gets overwritten.
+    # iteration 0 = first pass before any retune; N = the Nth retune's code.
+    iteration = retune_req.get("iteration", 0) if retune_req else 0
+    history_dir = os.path.join(os.path.dirname(code_path) or ".", "classifier_history")
+    os.makedirs(history_dir, exist_ok=True)
+    history_path = os.path.join(history_dir, f"classifier_iter{iteration}.py")
+    with open(history_path, "w", encoding="utf-8") as f:
+        f.write(formatted_code)
+
     metadata = {
         "model_name": "ProsusAI/finbert",
         "fine_tuning_params": {
             "threshold": threshold,
             "max_length": max_length,
-            "focus_labels": focus_labels
+            "focus_labels": focus_labels,
+            "boost_factor": boost_factor
         }
     }
 
     return {
         "classifier_code_path": code_path,
+        "classifier_history_path": history_path,
         "classifier_metadata": metadata
     }
 
