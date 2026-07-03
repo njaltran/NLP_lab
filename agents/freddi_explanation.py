@@ -64,6 +64,9 @@ DEFAULT_MODEL = "llama3.2"
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_TIMEOUT = 180.0       # generous so the first call survives a cold model load
 DEFAULT_KEEP_ALIVE = "15m"    # keep the model resident between rows
+# Prefixed onto every offline-fallback explanation so it can never be mistaken for
+# real model output — e.g. by a grader reading explanations.csv when Ollama wasn't set up.
+FALLBACK_MARKER = "[PLACEHOLDER - Ollama unavailable, not a real model explanation]"
 
 
 class ExplanationState(TypedDict, total=False):
@@ -155,7 +158,8 @@ def _build_chain(model: str, base_url: str, timeout: float):
 def fallback_explanation(row: dict) -> str:
     """Deterministic placeholder when Ollama is unavailable. Like the real prompt
     (Option A) it explains the prediction from the headline only and never references
-    the actual outcome. Replaced automatically by real output when Ollama is reachable.
+    the actual outcome. Prefixed with FALLBACK_MARKER so it is never mistaken for real
+    model output. Replaced automatically by real output when Ollama is reachable.
     """
     title = (row.get("article_title") or "the headline").strip()
     pred = (row.get("predicted_label") or "").strip()
@@ -165,6 +169,7 @@ def fallback_explanation(row: dict) -> str:
         "neutral": "little or no next-day move",
     }.get(pred, "the predicted next-day move")
     return _clean(
+        f"{FALLBACK_MARKER} "
         f'The headline "{title}" reads as a {pred or "neutral"} signal for the stock, '
         f"which is consistent with {direction}."
     )

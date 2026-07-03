@@ -92,6 +92,7 @@ def test_fallback_is_single_clean_option_a_sentence():
     assert text and "\n" not in text              # exactly one CSV-safe line
     assert "up" in text.lower()                   # reflects the prediction
     assert "SENTINEL_OUTCOME" not in text         # never references the outcome
+    assert text.startswith(fe.FALLBACK_MARKER)    # clearly labelled — never mistaken for real output
 
 
 # --- full LangGraph path through the public ExplanationAgent.run() API -------
