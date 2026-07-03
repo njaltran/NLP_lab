@@ -71,6 +71,29 @@ def _assign_label(pct_change, threshold):
     return "neutral"
 
 
+def _assign_split(df, dataset_end=None):
+    """Add a time-based train/test `split` column: earliest 80% of dates =
+    `train`, the rest = `test`. Date-based (not random) so no future information
+    can leak into training — the classifier trains on `train` rows and is scored
+    only on `test` rows it has never seen.
+
+    `dataset_end` (YYYY-MM-DD) optionally drops later rows *before* splitting —
+    e.g. "2019-12-31" keeps the COVID crash out of the test window so the
+    held-out accuracy measures the normal regime, not a structural break.
+    See docs/data_contracts.md, Handoff 1."""
+    if dataset_end:
+        before = len(df)
+        df = df[pd.to_datetime(df["date"]) <= pd.to_datetime(dataset_end)].reset_index(drop=True)
+        print(f"  Dataset ended at {dataset_end}: dropped {before - len(df):,} later rows")
+    split_cut = pd.to_datetime(df["date"]).quantile(0.8)
+    df["split"] = ["train" if d <= split_cut else "test"
+                   for d in pd.to_datetime(df["date"])]
+    n_train = int((df["split"] == "train").sum())
+    n_test = int((df["split"] == "test").sum())
+    print(f"  Split at {split_cut.date()}: {n_train:,} train / {n_test:,} test")
+    return df
+
+
 # ---------------------------------------------------------------------------
 # Processing node
 # ---------------------------------------------------------------------------
@@ -145,10 +168,14 @@ def processing_node(state: PipelineState) -> dict:
     ].reset_index(drop=True)
     print(f"  Outliers dropped: {before_outliers - len(df):,}. Final: {len(df):,} rows")
 
+    # 5b. Time-based train/test split (optionally pin the dataset end date to
+    # keep a later regime — e.g. COVID — out of the test window).
+    df = _assign_split(df, state.get("dataset_end"))
+
     # 6. Export (Handoff 1 schema from data_contracts.md)
     output_cols = [
         "article_id", "date", "ticker", "article_title",
-        "price_t", "price_t1", "pct_change", "label",
+        "price_t", "price_t1", "pct_change", "label", "split",
     ]
     df[output_cols].to_csv(out_path, index=False)
     print(f"[processing] Written to {out_path}")
@@ -189,11 +216,15 @@ if __name__ == "__main__":
                         help="Price-change threshold in decimal form (default: 0.01 = ±1%%)")
     parser.add_argument("--data-dir", type=str, default=None,
                         help="Data directory containing fnspid_raw.csv (default: data/)")
+    parser.add_argument("--dataset-end", type=str, default=None,
+                        help="Optional YYYY-MM-DD; drop rows after this date before "
+                             "splitting (e.g. 2019-12-31 keeps COVID out of the test window)")
     args = parser.parse_args()
 
     agent = ProcessingAgent()
     final_state = agent.run(
         threshold=args.threshold,
         data_dir=args.data_dir,
+        dataset_end=args.dataset_end,
     )
     print("\nOutput file:", final_state["processed_data_path"])

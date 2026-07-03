@@ -12,6 +12,9 @@ class PipelineState(TypedDict, total=False):
     # ── Runtime config ───────────────────────────────────────────────────────
     threshold: float        # price-change boundary (default 0.01 = ±1%)
     data_dir: str | None    # repo root; agents resolve file paths from here
+    dataset_end: str | None  # optional YYYY-MM-DD; Processing drops later rows
+                             # before the train/test split (e.g. "2019-12-31"
+                             # keeps COVID out of the test window)
     loop_iteration: int     # retune loop counter, starts at 1
 
     # ── Handoff 1: Processing → Classifier ──────────────────────────────────
