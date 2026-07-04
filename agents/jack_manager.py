@@ -231,6 +231,9 @@ def write_retune(state: ManagerState) -> dict:
         "misclassified_ids": report.get("misclassified_ids", []),
         "suggested_params": {**proposal.get("suggested_params", {}),
                              **overrides.get("suggested_params", {})},
+        # Sabina's code observations, passed through unchanged — Nadi's optional
+        # LLM code adaptation prompts with these (falls back to `reason` if empty).
+        "code_notes": proposal.get("code_notes", ""),
     })
     return {"decision_log": [f"iteration {state['iteration']}: wrote retune_request.json"]}
 

@@ -38,9 +38,12 @@ class FakeNadi:
     place and counts how many times it ran (so we can prove the graph cycled)."""
     def __init__(self):
         self.calls = 0
+        self.model_dir = None
 
-    def run(self, *, processed_data, classifier_code, predictions, retune_request=None):
+    def run(self, *, processed_data, classifier_code, predictions, retune_request=None,
+            model_dir=None):
         self.calls += 1
+        self.model_dir = model_dir
         Path(predictions).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(MOCK_PRED, predictions)
         Path(classifier_code).write_text("THRESHOLD = 0.5\n")  # readable by Sabina/Manager
@@ -99,3 +102,33 @@ def test_graph_cycles_then_finalizes(tmp_path, monkeypatch):
     # Retune params escalated across cycle passes (no exact repeat).
     req = json.loads((tmp_path / "outputs" / "retune_request.json").read_text())
     assert "suggested_params" in req
+
+    # Default build never asks Nadi for fine-tuned weights.
+    assert nadi.model_dir is None
+
+
+@needs_langgraph
+def test_model_dir_reaches_nadi(tmp_path, monkeypatch):
+    """`model_dir` set on build_pipeline must reach Nadi's run() so the loop can
+    opt in to the fine-tuned weights; it stays off unless explicitly passed."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "outputs").mkdir()
+
+    import agents.pipeline_graph as pg
+    from agents.jack_manager import ManagerAgent
+    from agents.freddi_explanation import ExplanationAgent
+    from langgraph.checkpoint.memory import MemorySaver
+
+    nadi = FakeNadi()
+    agents = pg.Agents(
+        aurora=FakeAurora(), nadi=nadi, sabina=FakeSabina(),
+        manager=ManagerAgent(predictions_path=pg.PREDS, target_accuracy=0.60,
+                             max_iterations=9, patience=2, min_delta=0.01),
+        freddi=ExplanationAgent(use_ollama=False, output_path=pg.EXPL),
+    )
+    graph = pg.build_pipeline(agents, model_dir="outputs/finbert_finetuned",
+                              checkpointer=MemorySaver())
+    graph.invoke({"retune_request_path": None},
+                 {"configurable": {"thread_id": "t"}, "recursion_limit": pg.RECURSION_LIMIT})
+
+    assert nadi.model_dir == "outputs/finbert_finetuned"

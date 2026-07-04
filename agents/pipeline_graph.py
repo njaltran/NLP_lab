@@ -107,11 +107,15 @@ class Agents:
         )
 
 
-def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, checkpointer=None):
+def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=None,
+                   checkpointer=None):
     """Compile the unified pipeline graph. `agents` supplies the five agents (real
     or fake); `threshold` is Aurora's labelling band; `data_dir` overrides where
-    Aurora reads fnspid_raw.csv (defaults to the repo `data/`). The node functions
-    close over these, so no non-serialisable objects live in the graph state.
+    Aurora reads fnspid_raw.csv (defaults to the repo `data/`); `model_dir`, when
+    set, is handed to Nadi so the classifier loads fine-tuned weights instead of
+    pretrained FinBERT (opt-in — omitted means today's behaviour). The node
+    functions close over these, so no non-serialisable objects live in the graph
+    state.
     """
     from langgraph.graph import StateGraph, START, END
 
@@ -125,9 +129,10 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, checkpointe
         """Nadi: (re)generate and run the classifier. On cycle passes,
         `retune_request_path` points at the Manager's latest retune request so the
         params escalate; on the first pass it is None (fresh classifier)."""
+        extra = {"model_dir": model_dir} if model_dir else {}
         agents.nadi.run(processed_data=state["processed_data_path"],
                         classifier_code=CODE, predictions=PREDS,
-                        retune_request=state.get("retune_request_path"))
+                        retune_request=state.get("retune_request_path"), **extra)
         return {}
 
     def evaluate(state: PipelineState) -> dict:
@@ -178,7 +183,8 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, checkpointe
 
 
 def run(*, threshold=0.01, target_accuracy=0.60, max_iterations=5, patience=2,
-        min_delta=0.01, sample_size=300, use_ollama=True, data_dir=None) -> dict:
+        min_delta=0.01, sample_size=300, use_ollama=True, data_dir=None,
+        model_dir=None) -> dict:
     """Build the pipeline with real agents and run it once end to end, returning the
     final graph state. This is the entry point `main.py` calls."""
     from langgraph.checkpoint.memory import MemorySaver
@@ -187,7 +193,7 @@ def run(*, threshold=0.01, target_accuracy=0.60, max_iterations=5, patience=2,
                           patience=patience, min_delta=min_delta, sample_size=sample_size,
                           use_ollama=use_ollama)
     graph = build_pipeline(agents, threshold=threshold, data_dir=data_dir,
-                           checkpointer=MemorySaver())
+                           model_dir=model_dir, checkpointer=MemorySaver())
     return graph.invoke(
         {"retune_request_path": None},
         {"configurable": {"thread_id": "pipeline"}, "recursion_limit": RECURSION_LIMIT},

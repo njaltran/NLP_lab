@@ -123,6 +123,27 @@ def test_outputs_match_contract(outdir, proceed_report):
     assert rep["manually_scored"] == int(fin.manual_score.notna().sum())
 
 
+def test_retune_request_carries_code_notes(outdir):
+    """Nadi's LLM code adaptation reads `code_notes` from retune_request.json,
+    so the manager must pass Sabina's observations through unchanged."""
+    g, cfg = _graph(), {"configurable": {"thread_id": "notes"}}
+    report = json.loads(json.dumps(RETUNE_REPORT))
+    report["proposal"]["code_notes"] = "threshold hardcoded at 0.5 in classifier.py"
+    g.invoke({**BASE, "evaluation_report": report}, cfg)
+    req = json.loads((outdir / "retune_request.json").read_text())
+    assert req["code_notes"] == "threshold hardcoded at 0.5 in classifier.py"
+
+
+def test_retune_request_code_notes_empty_when_proposal_omits_them(outdir):
+    g, cfg = _graph(), {"configurable": {"thread_id": "notes-empty"}}
+    report = {"accuracy": 0.37,
+              "proposal": {"recommended_action": "retune", "focus_labels": ["down"],
+                           "suggested_params": {"threshold": 0.5, "max_length": 128}}}
+    g.invoke({**BASE, "evaluation_report": report}, cfg)
+    req = json.loads((outdir / "retune_request.json").read_text())
+    assert req["code_notes"] == ""
+
+
 # --- public ManagerAgent.run() API ---------------------------------------
 
 def test_manager_agent_run_lifecycle(outdir, tmp_path, proceed_report):

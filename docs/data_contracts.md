@@ -117,6 +117,7 @@ The approved proposal Nadi acts on — Sabina's proposal as accepted or overridd
 | focus_labels | list | ["down", "neutral"] | approved focus classes |
 | misclassified_ids | list | ["FNSPID_00423", ...] | rows to inspect or reweight |
 | suggested_params | object | {"threshold": 0.5, "max_length": 128, "boost_factor": 1.25} | approved hyperparameters Nadi regenerates the code with; `boost_factor` (default 1.25) scales the softmax probability of each `focus_labels` class before renormalizing |
+| code_notes | string | threshold hardcoded at 0.5 in classifier.py | Sabina's `code_notes` from the proposal, passed through unchanged (empty string if none) — input to Nadi's optional LLM code adaptation |
 
 ## Handoff 4 — Manager Agent (Jack) → Explanation Agent (Freddi)
 
