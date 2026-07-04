@@ -126,17 +126,16 @@ def _next_params(tried: list, history: list = ()) -> dict:
 
     1. Revert-and-perturb: if the latest accuracy regressed more than
        _REGRESSION_DELTA below the best, perturb the best iteration's params.
-       `history[i]` is iteration i+1's accuracy; iteration 1 ran on defaults and
-       each later iteration k ran on `tried[k-2]`, so the best history index b
-       maps to `tried[b-1]` (or defaults for b == 0).
     2. Otherwise: first schedule entry not already tried, or the last entry once
        the schedule is exhausted (the iteration cap still bounds the loop, so
        returning a repeat here is safe)."""
-    history = list(history)
     if len(history) >= 2 and tried:
         best = max(range(len(history)), key=lambda i: history[i])
         if history[-1] < history[best] - _REGRESSION_DELTA:
-            base = tried[best - 1] if 1 <= best <= len(tried) else {}
+            # Params per iteration: iteration 1 ran on Nadi's defaults, each
+            # later one on the next `tried` entry.
+            per_iteration = [{}] + list(tried)
+            base = per_iteration[best] if best < len(per_iteration) else {}
             threshold = base.get("threshold", 0.5)
             boost = base.get("boost_factor", 1.25)
             candidates = [
@@ -152,6 +151,21 @@ def _next_params(tried: list, history: list = ()) -> dict:
         if not any(_same(params, t) for t in tried):
             return params
     return _RETUNE_SCHEDULE[-1]
+
+
+def _is_collapsed(report: dict, floor: float) -> bool:
+    """True when any class's recall sits below `floor` — the aggregate accuracy
+    is then a degenerate win (e.g. everything predicted neutral)."""
+    class_accuracy = report.get("class_accuracy", {})
+    return bool(class_accuracy) and min(class_accuracy.values()) < floor
+
+
+def report_score(report: dict, floor: float = 0.05) -> float:
+    """Rank an iteration for best-snapshot purposes: plain accuracy, pushed below
+    every healthy score when a class collapsed. One definition shared with the
+    pipeline's best-iteration snapshot, mirroring the gate's collapse floor — so
+    `select_best` can never restore a degenerate pass over a healthy one."""
+    return report["accuracy"] - (1.0 if _is_collapsed(report, floor) else 0.0)
 
 
 def _converged(history: list, patience: int, min_delta: float) -> bool:
@@ -177,23 +191,19 @@ def decide(state: ManagerState) -> dict:
     """
     report = state["evaluation_report"]
     accuracy = report["accuracy"]
-    # Count retune cycles only: once we've proceeded, the finalize pass is not a
-    # new iteration, so don't bump the counter or re-append its accuracy.
-    finalize_pass = state.get("final_action") == "proceed"
-    iteration = state.get("iteration", 0) + (0 if finalize_pass else 1)
+    # Retune cycles only — the finalize pass routes straight to `finalize` and
+    # never reaches this node (see `route_entry`).
+    iteration = state.get("iteration", 0) + 1
 
     # Full accuracy trend INCLUDING this iteration — the input to convergence.
     history = state.get("accuracy_history", []) + [accuracy]
     patience = state.get("patience", 2)
     min_delta = state.get("min_delta", 0.01)
 
-    # A class collapsed to (near-)zero recall means the aggregate accuracy is a
-    # degenerate win (e.g. everything predicted neutral) — don't let it clear
-    # the gate. Cap/convergence can still force proceed; select_best then
-    # restores the best earlier iteration anyway.
-    class_accuracy = report.get("class_accuracy", {})
-    floor = state.get("min_class_accuracy", 0.05)
-    collapsed = bool(class_accuracy) and min(class_accuracy.values()) < floor
+    # A collapsed class means the aggregate accuracy is a degenerate win — don't
+    # let it clear the gate. Cap/convergence can still force proceed; select_best
+    # then restores the best (collapse-penalized) earlier iteration anyway.
+    collapsed = _is_collapsed(report, state.get("min_class_accuracy", 0.05))
 
     # Three independent reasons to stop retuning and move on.
     cleared = accuracy >= state["target_accuracy"] and not collapsed
@@ -220,9 +230,7 @@ def decide(state: ManagerState) -> dict:
         "final_action": final_action,
         "notes": note,                   # plain field → overwrites
         "decision_log": [note],          # reducer field → appended
-        # reducer field → appended; nothing on the finalize pass, which re-reads
-        # the report the loop already recorded
-        "accuracy_history": [] if finalize_pass else [accuracy],
+        "accuracy_history": [accuracy],  # reducer field → appended
     }
 
     if final_action == "retune":
@@ -252,12 +260,18 @@ def decide(state: ManagerState) -> dict:
     return out
 
 
+def route_entry(state: ManagerState) -> str:
+    """Entry router: explanations back from Freddi → finalize directly. The gate
+    already proceeded on this report, so re-running decide would re-count the
+    iteration, re-append its accuracy, and burn an LLM rationale on a decision
+    that cannot change."""
+    return "finalize" if state.get("explanations_path") else "decide"
+
+
 def route_after_decide(state: ManagerState) -> str:
-    """Router: retune, or — on proceed — finalize if Freddi's explanations are
-    back, else sample and wait. Reads decisions the nodes already made."""
-    if state["final_action"] == "retune":
-        return "retune"
-    return "finalize" if state.get("explanations_path") else "sample"
+    """Router: retune, or sample for explanation on proceed. Reads the decision
+    the gate already made."""
+    return "retune" if state["final_action"] == "retune" else "sample"
 
 
 def write_retune(state: ManagerState) -> dict:
@@ -412,11 +426,11 @@ def build_graph(checkpointer):
     b.add_node("write_retune", write_retune)
     b.add_node("proceed", proceed)
     b.add_node("finalize", finalize)
-    b.add_edge(START, "decide")
+    b.add_conditional_edges(START, route_entry, {"decide": "decide", "finalize": "finalize"})
     b.add_edge("decide", "rationale")       # gate first, then explain
     b.add_conditional_edges(
         "rationale", route_after_decide,
-        {"retune": "write_retune", "sample": "proceed", "finalize": "finalize"},
+        {"retune": "write_retune", "sample": "proceed"},
     )
     b.add_edge("write_retune", END)
     b.add_edge("proceed", END)

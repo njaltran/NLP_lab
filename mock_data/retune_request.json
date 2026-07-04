@@ -2,7 +2,7 @@
   "iteration": 1,
   "reason": "accuracy 0.54 below target 0.60",
   "current_accuracy": 0.54,
-  "target_accuracy": 0.6,
+  "target_accuracy": 0.60,
   "focus_labels": [
     "neutral",
     "down"

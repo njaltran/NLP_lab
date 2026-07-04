@@ -34,19 +34,13 @@ BASE_MODEL = "ProsusAI/finbert"
 LABELS = ["up", "down", "neutral"]
 LABEL_TO_ID = {"up": 0, "down": 1, "neutral": 2}
 
-def load_dotenv(path=".env"):
-    """Populate os.environ from a local .env (KEY=VALUE lines) if it exists —
-    same helper main.py uses, repeated here because this script runs standalone,
-    outside the pipeline entry point. Real environment variables take precedence."""
-    if not os.path.exists(path):
-        return
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, _, val = line.partition("=")
-                os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
-
+# Same .env loader main.py uses — imported here too because this script runs
+# standalone, outside the pipeline entry point. Dual import: works as a package
+# member and as a bare script (`uv run agents/finetune_finbert.py`).
+try:
+    from agents.env import load_dotenv
+except ModuleNotFoundError:
+    from env import load_dotenv
 
 load_dotenv()
 

@@ -9,24 +9,9 @@ secrets and parses flags — the orchestration lives in the graph. Run:
 """
 
 import argparse
-import os
 
+from agents.env import load_dotenv
 from agents.pipeline_graph import run, OUT
-
-
-def load_dotenv(path=".env"):
-    """Populate os.environ from a local .env (KEY=VALUE lines) if it exists, so
-    secrets like HF_TOKEN reach the agents — and Nadi's classifier subprocess,
-    which inherits this process's env — without the user exporting them by hand.
-    Real environment variables take precedence over .env values."""
-    if not os.path.exists(path):
-        return
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, _, val = line.partition("=")
-                os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
 
 
 def main():

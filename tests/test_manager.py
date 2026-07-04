@@ -67,7 +67,9 @@ def test_full_lifecycle(outdir, proceed_report):
     assert r3["iteration"] == 2          # finalize is NOT a new loop iteration
     assert (outdir / "final_results.csv").exists()
     assert (outdir / "final_report.json").exists()
-    assert len(r3["decision_log"]) == 6  # reducer accumulated: 2 entries × 3 invocations
+    # reducer accumulated: 2 entries per loop invocation + 1 from finalize,
+    # which routes straight to its node (no decide pass).
+    assert len(r3["decision_log"]) == 5
 
 
 # --- gate: accept vs override --------------------------------------------
@@ -227,8 +229,9 @@ def test_second_retune_skips_schedule_entry_matching_sabinas_proposal():
 
 
 def test_finalize_pass_does_not_duplicate_accuracy_history(proceed_report):
-    """The finalize invocation re-runs decide on the same report; it must not
-    append the same accuracy a second time (bug seen live: 9 entries, 8 iterations)."""
+    """The finalize invocation must not re-append the accuracy the loop already
+    recorded (bug seen live: 9 entries, 8 iterations) — it routes straight to
+    the finalize node, bypassing decide."""
     g, cfg = _graph(), {"configurable": {"thread_id": "no-dup"}}
     g.invoke({**BASE, "evaluation_report": RETUNE_REPORT}, cfg)
     g.invoke({**BASE, "evaluation_report": proceed_report}, cfg)
@@ -249,6 +252,15 @@ def test_class_collapse_blocks_cleared_target():
     }
     out = jm.decide(state)
     assert out["final_action"] == "retune"
+
+
+def test_report_score_ranks_collapsed_below_healthy():
+    """The best-iteration snapshot must rank on the same rule as the gate: a
+    collapsed high-accuracy pass never beats a healthy lower-accuracy one."""
+    healthy = {"accuracy": 0.39, "class_accuracy": {"up": 0.3, "down": 0.2, "neutral": 0.5}}
+    collapsed = {"accuracy": 0.65, "class_accuracy": {"up": 0.0, "down": 0.0, "neutral": 1.0}}
+    assert jm.report_score(healthy) > jm.report_score(collapsed)
+    assert jm.report_score(healthy) == 0.39   # healthy score IS the accuracy
 
 
 def test_regression_reverts_to_best_params_and_perturbs():

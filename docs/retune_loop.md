@@ -56,7 +56,9 @@ flowchart TD
 - Proceed fires on any of: target accuracy (0.60) cleared, iteration cap (5)
   hit, or convergence — the best of the last 2 iterations gained less than
   0.01 over the best before them.
-- On proceed, `select_best` restores the highest-accuracy iteration's
-  artifacts (predictions/report/classifier snapshotted to `outputs/best/` on
-  each new best), so a regressed final retune can't ship worse results than an
-  earlier pass — accuracy did regress 0.39 → 0.23 on the 2026-07-04 run.
+- On proceed, `select_best` restores the highest-scoring iteration's artifacts
+  (predictions/report/classifier snapshotted to `outputs/best/` on each new
+  best; score = accuracy, penalized below any healthy score when a class
+  collapsed — the same rule as the gate's floor), so a regressed final retune
+  can't ship worse results than an earlier pass — accuracy did regress
+  0.39 → 0.23 on the 2026-07-04 run.
