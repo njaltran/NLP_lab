@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 import sys
 
@@ -88,29 +89,34 @@ class ExplanationState(TypedDict, total=False):
 
 
 # Structured prompt, engineered with the lecture's components (as in Jack's agent):
-# Persona (line 1), ### SECTIONS ###, CAPITALS for hard constraints, plain-prose
-# Output rule, and one EXAMPLE (one-shot). Option A is enforced here: the model is
-# never told the actual outcome.
+# Persona (line 1), ### SECTIONS ###, CAPITALS for hard constraints, a ### THINKING ###
+# Chain-of-Thought step, a structured JSON ### OUTPUT ###, and one EXAMPLE (one-shot).
+# Option A is enforced: the model is never told the actual outcome. The model reasons in
+# the JSON "reasoning" field, but only "explanation" is written to the CSV.
 EXPLANATION_SYSTEM_PROMPT = """You are a FINANCIAL ANALYST who explains a stock-move \
-model's prediction in one plain sentence for a human reviewer.
+model's prediction for a human reviewer.
 
 ### CONTEXT ###
 A classifier predicted a stock's next-day move (up / down / neutral) from a single news
 headline. You are given the headline and that prediction. You do NOT know the actual
 next-day outcome and you must NOT guess it.
 
-### YOUR TASK ###
-Write ONE clear sentence (max ~25 words) explaining why the headline could justify the
-predicted move.
+### THINKING ###
+FIRST reason step by step: what does the headline imply for the company, and why would
+that support the predicted move? THEN write the final one-sentence explanation.
 
 ### CONSTRAINTS ###
 - Use ONLY what the headline states. DO NOT invent facts, numbers, or events.
 - DO NOT mention whether the prediction was right or wrong, or refer to the real outcome.
-- Output PLAIN PROSE ONLY — no preamble, no markdown, no lists, no restating the task.
+- The explanation must be ONE sentence, max ~25 words, PLAIN PROSE.
+
+### OUTPUT ###
+Return ONLY valid JSON with exactly these two keys and nothing else:
+{"reasoning": "<your step-by-step thinking>", "explanation": "<the ONE-sentence explanation>"}
 
 ### EXAMPLE ###
-Input  — Headline: "Retailer cuts profit outlook on weak demand". Predicted move: a downward next-day move.
-Output — The lowered profit outlook points to weaker earnings, which could push the stock down the next day.
+Headline: "Retailer cuts profit outlook on weak demand". Predicted move: a downward next-day move.
+{"reasoning": "A cut profit outlook signals weaker expected earnings; investors typically sell on lower guidance, pushing the price down.", "explanation": "The lowered profit outlook points to weaker earnings, which could push the stock down the next day."}
 """
 
 
@@ -137,18 +143,21 @@ def _build_chain(model: str, base_url: str, timeout: float):
     exercise-7 pattern. Imported lazily so the offline fallback path needs no
     LangChain install, and so a bad import surfaces as a clean fallback, not a crash.
     """
+    from langchain_core.messages import SystemMessage
     from langchain_core.output_parsers import StrOutputParser
     from langchain_core.prompts import ChatPromptTemplate
     from langchain_ollama import ChatOllama
 
+    # Pass the system prompt as a literal SystemMessage, NOT a template string —
+    # otherwise the `{ }` in the JSON output spec are parsed as template variables.
     prompt = ChatPromptTemplate.from_messages(
-        [("system", EXPLANATION_SYSTEM_PROMPT), ("user", "{user_input}")]
+        [SystemMessage(content=EXPLANATION_SYSTEM_PROMPT), ("user", "{user_input}")]
     )
     llm = ChatOllama(
         model=model,
         base_url=base_url,
         temperature=0.3,            # low: grounded, low-variance explanations
-        num_predict=80,             # one sentence is plenty
+        num_predict=220,            # room for the JSON reasoning + explanation
         keep_alive=DEFAULT_KEEP_ALIVE,
         client_kwargs={"timeout": timeout},
     )
@@ -178,6 +187,26 @@ def fallback_explanation(row: dict) -> str:
 def _clean(text: str) -> str:
     """Collapse whitespace/newlines so each explanation is a single CSV-safe line."""
     return " ".join(text.split()).strip()
+
+
+def _extract_explanation(raw: str) -> str:
+    """Pull the `explanation` field out of the model's JSON reply.
+
+    The model is asked to return {"reasoning": ..., "explanation": ...} so its
+    Chain-of-Thought stays in `reasoning` and only the sentence reaches the CSV.
+    Tolerates code fences / stray text around the JSON. Raises ValueError if no
+    usable explanation is found (the caller then falls back for that row only).
+    """
+    text = (raw or "").strip()
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            obj = json.loads(text[start:end + 1])
+        except json.JSONDecodeError:
+            obj = None
+        if isinstance(obj, dict) and str(obj.get("explanation", "")).strip():
+            return _clean(str(obj["explanation"]))
+    raise ValueError("model output had no usable 'explanation' JSON field")
 
 
 # --- LangGraph nodes ------------------------------------------------------------
@@ -217,12 +246,18 @@ def explain(state: ExplanationState) -> dict:
         explanation = ""
         if chain is not None:
             try:
-                explanation = _clean(chain.invoke({"user_input": _user_message(row)}))
-                ollama_used = True
-            except Exception as exc:  # call failed → stop hammering, fall back
+                raw = chain.invoke({"user_input": _user_message(row)})
+            except Exception as exc:  # call failed → stop hammering, fall back for rest
                 print(f"[freddi] Ollama call failed ({exc}); switching to offline "
                       "fallback for remaining rows.", file=sys.stderr)
                 chain = None
+            else:
+                try:
+                    explanation = _extract_explanation(raw)  # keep only the sentence
+                    ollama_used = True
+                except ValueError as exc:  # unparseable JSON → fall back THIS row only
+                    print(f"[freddi] {row.get('article_id')}: {exc}; using fallback "
+                          "for this row.", file=sys.stderr)
         if not explanation:
             explanation = fallback_explanation(row)
 

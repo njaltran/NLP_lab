@@ -95,6 +95,25 @@ def test_fallback_is_single_clean_option_a_sentence():
     assert text.startswith(fe.FALLBACK_MARKER)    # clearly labelled — never mistaken for real output
 
 
+# --- Chain-of-Thought / structured JSON output parsing ----------------------
+
+def test_extract_explanation_pulls_only_the_sentence():
+    raw = ('{"reasoning": "recall -> costs -> investors sell -> down", '
+           '"explanation": "An airbag recall raises cost concerns that could pull the stock down."}')
+    assert fe._extract_explanation(raw) == \
+        "An airbag recall raises cost concerns that could pull the stock down."
+
+
+def test_extract_explanation_tolerates_fences_and_stray_text():
+    raw = 'Sure! ```json\n{"reasoning": "x", "explanation": "The headline supports an upward move."}\n```'
+    assert fe._extract_explanation(raw) == "The headline supports an upward move."
+
+
+def test_extract_explanation_raises_on_unparseable_output():
+    with pytest.raises(ValueError):
+        fe._extract_explanation("this is not JSON at all")
+
+
 # --- full LangGraph path through the public ExplanationAgent.run() API -------
 
 @needs_langgraph
