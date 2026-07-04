@@ -1,0 +1,19 @@
+{
+  "eval_split": "test",
+  "final_accuracy": 0.5,
+  "final_test_accuracy": 0.5,
+  "loop_iterations": 5,
+  "class_accuracy": {
+    "up": 0.36,
+    "down": 0.05,
+    "neutral": 0.76
+  },
+  "test_class_accuracy": {
+    "up": 0.36,
+    "down": 0.05,
+    "neutral": 0.76
+  },
+  "test_set_size": 2196,
+  "explanations_generated": 300,
+  "manually_scored": 0
+}
