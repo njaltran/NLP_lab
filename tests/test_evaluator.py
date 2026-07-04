@@ -164,11 +164,11 @@ def test_build_report_scores_requested_split_only():
 
     report = se.build_report(rows, code, eval_split="val")
 
+    # Both mock val rows are correct predictions — exact values, fixed data.
     assert report["eval_split"] == "val"
-    scored = report["misclassified_count"] + round(
-        report["accuracy"] * len(val_rows))
-    assert scored == len(val_rows) or report["accuracy"] in (0.0, 1.0)
-    assert set(report["misclassified_ids"]) <= {r["article_id"] for r in val_rows}
+    assert report["accuracy"] == 1.0
+    assert report["misclassified_count"] == 0
+    assert report["misclassified_ids"] == []
 
 
 def test_build_report_raises_when_split_absent():

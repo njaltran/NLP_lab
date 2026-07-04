@@ -130,21 +130,20 @@ def main(src: str, dst: str) -> None:
     # Predict only the held-out rows (val + test); the train rows were used to
     # fit the model, so scoring them would leak. The evaluator scores val rows
     # during retune cycles and test rows only for the final report.
-    # No split column -> treat all rows as test.
-    if "split" in rows[0]:
-        rows = [r for r in rows if r["split"] != "train"]
-        if not rows:
-            raise ValueError("No val/test rows in input")
+    if "split" not in rows[0]:
+        raise ValueError("Input has no split column (required by Handoff 1)")
+    rows = [r for r in rows if r["split"] != "train"]
+    if not rows:
+        raise ValueError("No val/test rows in input")
 
     out_cols = [c for c in rows[0].keys() if c != "split"] + [
         "predicted_label", "confidence", "prob_up", "prob_down", "prob_neutral", "split"
     ]
 
-    # Predict each held-out row, keeping its original split value.
+    # Predict each held-out row; its split value passes through untouched.
     for row in rows:
         pred_data = classify(row["article_title"])
         row.update(pred_data)
-        row.setdefault("split", "test")
         
     os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
     with open(dst, "w", newline="", encoding="utf-8") as f:

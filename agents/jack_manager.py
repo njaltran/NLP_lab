@@ -67,6 +67,19 @@ def _write_json(name: str, obj: dict) -> None:
         json.dump(obj, f, indent=2)
 
 
+def _test_rows(preds):
+    """Keep only the TEST rows of a predictions frame. Predictions carry val +
+    test rows; the val rows exist for the loop's own scoring, while Freddi's
+    sample and the finals must be test-only. Loud on a contract violation —
+    silently shipping mixed rows is the leak the val split exists to prevent."""
+    if "split" not in preds.columns:
+        raise ValueError("predictions file has no split column (Handoff 2)")
+    test = preds[preds["split"] == "test"]
+    if test.empty:
+        raise ValueError("predictions file has no split=test rows")
+    return test
+
+
 def _write_decision(state: "ManagerState") -> None:
     """decision.json — Jack's record, written every iteration (Handoff 3b). The
     file is overwritten each iteration, so `accuracy_history` (cumulative through
@@ -315,11 +328,7 @@ def write_sample(predictions_path: str, sample_size: int = 300) -> int:
     sample format has exactly one definition."""
     import pandas as pd
 
-    preds = pd.read_csv(predictions_path)
-    # Predictions carry val + test rows; Freddi explains held-out TEST
-    # predictions only (the val rows exist for the loop's own scoring).
-    if "split" in preds.columns:
-        preds = preds[preds["split"] == "test"]
+    preds = _test_rows(pd.read_csv(predictions_path))
     sample = (preds[["article_id", "article_title", "predicted_label", "label",
                      "confidence", "prob_up", "prob_down", "prob_neutral"]]
               .rename(columns={"label": "actual_label"}))
@@ -345,9 +354,7 @@ def finalize(state: ManagerState) -> dict:
     is back from Freddi. Joins predictions to explanations and writes the finals."""
     import pandas as pd
 
-    preds = pd.read_csv(state.get("predictions_path", "mock_data/predictions_test.csv"))
-    if "split" in preds.columns:                  # finals report the TEST rows only
-        preds = preds[preds["split"] == "test"]
+    preds = _test_rows(pd.read_csv(state.get("predictions_path", "mock_data/predictions_test.csv")))
     expl = pd.read_csv(state["explanations_path"])[["article_id", "explanation", "manual_score"]]
     final = preds.merge(expl, on="article_id", how="left")[[
         "article_id", "date", "ticker", "article_title", "price_t", "price_t1",

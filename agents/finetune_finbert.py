@@ -87,19 +87,26 @@ def pick_device():
 def split_frames(df):
     """Split the data into train / validation / test DataFrames.
 
-    train/test come straight from Aurora's `split` column. We carve the
-    validation set out of the LAST 10% of training DATES (not random rows) so
-    validation looks like the real future test set and nothing leaks."""
+    All three come straight from Aurora's `split` column — she owns the one
+    date-based boundary (val = last 10% of training dates), so this script and
+    the retune loop validate on the same rows. Older files without `val` rows
+    get the same carve computed here as a fallback."""
     if "split" not in df.columns:
         raise SystemExit(
             "processed_data.csv has no 'split' column. Regenerate it with the "
             "Processing agent first: uv run agents/aurora_processing.py"
         )
 
-    train_all = df[df["split"] == "train"]
     test = df[df["split"] == "test"]
 
-    # The date that sits at the 90% mark of the training dates.
+    if (df["split"] == "val").any():
+        train = df[df["split"] == "train"]
+        val = df[df["split"] == "val"]
+        return train, val, test
+
+    # Fallback for pre-val files: carve the LAST 10% of training DATES (not
+    # random rows) so validation looks like the real future test set.
+    train_all = df[df["split"] == "train"]
     val_cutoff = pd.to_datetime(train_all["date"]).quantile(0.9)
     is_val = pd.to_datetime(train_all["date"]) > val_cutoff
 

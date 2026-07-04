@@ -550,7 +550,7 @@ def load_inputs(state: EvaluatorState) -> dict:
 def evaluate(state: EvaluatorState) -> dict:
     """LangGraph node — compute metrics and build the evaluator report."""
     return {"report": build_report(state["predictions"], state["code_text"],
-                                   eval_split=state.get("eval_split", "test"))}
+                                   eval_split=state["eval_split"])}
 
 
 def write_report(state: EvaluatorState) -> dict:
