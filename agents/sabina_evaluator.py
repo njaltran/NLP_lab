@@ -1,10 +1,20 @@
-"""Evaluator agent — score classifier predictions and propose the next step.
+"""Evaluator Agent
+Owner: Sabina Rudolph
 
-Reads Nadi's `predictions_test.csv` and generated `classifier.py`, computes
-classification metrics deterministically, asks an LLM to review the classifier
-code and metrics, and writes Jack's input: `evaluation_report.json`.
+Reads the Classifier Agent's `predictions_test.csv` and generated
+`classifier.py`, computes classification metrics deterministically, asks an LLM
+to review the classifier code and metrics, and writes the Manager Agent's input:
+`evaluation_report.json`.
 
-See docs/data_contracts.md (Handoff 3).
+Exports
+-------
+EvaluatorAgent   Agent subclass — callers do EvaluatorAgent().run()
+build_report     pure report builder used by the graph and tests
+
+Usage (standalone test):
+    python agents/sabina_evaluator.py
+
+See docs/data_contracts.md, Handoff 3.
 """
 
 import csv
@@ -46,6 +56,12 @@ PREDICTION_COLUMNS = [
 
 
 class EvaluatorState(TypedDict, total=False):
+    """State passed through the evaluator LangGraph.
+
+    The graph starts with file paths, then adds the loaded predictions,
+    classifier source text, and final report before writing JSON to disk.
+    """
+
     predictions_path: str
     classifier_code_path: str
     output_path: str
@@ -56,6 +72,7 @@ class EvaluatorState(TypedDict, total=False):
 
 
 def _read_predictions(path: str) -> list[dict]:
+    """Read classifier predictions and enforce the exact Handoff 2 columns."""
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
@@ -70,6 +87,7 @@ def _read_predictions(path: str) -> list[dict]:
 
 
 def _read_code(path: str) -> str:
+    """Read the generated classifier.py as text for static review."""
     with open(path, encoding="utf-8") as f:
         return f.read()
 
@@ -123,11 +141,13 @@ def compute_metrics(rows: list[dict]) -> dict:
 
 
 def _find_assignment(code_text: str, name: str) -> str | None:
+    """Return the right-hand side of a simple `NAME = value` assignment."""
     match = re.search(rf"^\s*{re.escape(name)}\s*=\s*([^\n#]+)", code_text, re.M)
     return match.group(1).strip() if match else None
 
 
 def _float_assignment(code_text: str, name: str, default: float) -> float:
+    """Read a numeric assignment from classifier.py, falling back if missing."""
     value = _find_assignment(code_text, name)
     if value is None:
         return default
@@ -138,6 +158,7 @@ def _float_assignment(code_text: str, name: str, default: float) -> float:
 
 
 def _int_assignment(code_text: str, name: str, default: int) -> int:
+    """Read an integer assignment from classifier.py, falling back if missing."""
     value = _find_assignment(code_text, name)
     if value is None:
         return default
@@ -148,6 +169,7 @@ def _int_assignment(code_text: str, name: str, default: int) -> int:
 
 
 def _weakest_labels(class_accuracy: dict) -> list[str]:
+    """Return labels within FOCUS_MARGIN of the weakest class accuracy."""
     weakest_score = min(class_accuracy.values())
     return [
         label_name
@@ -157,7 +179,7 @@ def _weakest_labels(class_accuracy: dict) -> list[str]:
 
 
 def review_classifier_code(code_text: str, class_accuracy: dict) -> str:
-    """Return concise static observations from Nadi's generated classifier.py."""
+    """Return concise static observations from the generated classifier.py."""
     notes = []
     threshold = _find_assignment(code_text, "THRESHOLD")
     if threshold is not None:
@@ -216,7 +238,7 @@ def make_base_proposal(metrics: dict, code_text: str, code_notes: str) -> dict:
 
 
 def validate_proposal(proposal: dict, metrics: dict) -> dict:
-    """Validate Jack's proposal object before it can enter evaluation_report.json."""
+    """Validate the proposal before it can enter evaluation_report.json."""
     if not isinstance(proposal, dict):
         raise ValueError("LLM proposal must be a JSON object")
 
@@ -426,6 +448,11 @@ def build_report(
     code_text: str,
     llm_fn: Callable[[str], str] | None = None,
 ) -> dict:
+    """Build the complete Handoff 3 `evaluation_report.json` object.
+
+    Metrics, action, focus labels, and suggested params are deterministic.
+    The optional LLM can only improve `reason` and `code_notes`.
+    """
     validate_predictions(rows)
     metrics = compute_metrics(rows)
     code_notes = review_classifier_code(code_text, metrics["class_accuracy"])
@@ -445,12 +472,14 @@ def build_report(
 
 
 def _write_json(path: str, obj: dict) -> None:
+    """Write UTF-8 JSON and create the output folder if needed."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(obj, f, indent=2)
 
 
 def load_inputs(state: EvaluatorState) -> dict:
+    """LangGraph node — load classifier predictions and generated code."""
     return {
         "predictions": _read_predictions(state["predictions_path"]),
         "code_text": _read_code(state["classifier_code_path"]),
@@ -458,10 +487,12 @@ def load_inputs(state: EvaluatorState) -> dict:
 
 
 def evaluate(state: EvaluatorState) -> dict:
+    """LangGraph node — compute metrics and build the evaluator report."""
     return {"report": build_report(state["predictions"], state["code_text"])}
 
 
 def write_report(state: EvaluatorState) -> dict:
+    """LangGraph node — write `evaluation_report.json` for the Manager Agent."""
     output_path = state.get("output_path") or os.path.join(
         OUTPUT_DIR,
         "evaluation_report.json",
@@ -471,6 +502,7 @@ def write_report(state: EvaluatorState) -> dict:
 
 
 def build_graph(checkpointer):
+    """Compile the evaluator's three-step LangGraph: load, evaluate, write."""
     from langgraph.graph import StateGraph, START, END
 
     builder = StateGraph(EvaluatorState)
