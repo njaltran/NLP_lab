@@ -25,18 +25,19 @@ finalize (once Freddi's explanations are back).
 
 ```mermaid
 flowchart TD
-    A["Aurora: process<br/>FNSPID + yfinance → processed_data.csv<br/>split: train/test by date"] --> N
+    A["Aurora: process<br/>FNSPID + yfinance<br/>writes processed_data.csv, split train/test by date"] --> N
 
-    N["Nadi: classify<br/>FinBERT or fine-tuned weights via model_dir<br/>writes predictions_test.csv"] --> S
-    S["Sabina: evaluate<br/>metrics deterministic, LLM polishes reason + code_notes<br/>writes evaluation_report.json"] --> G
+    N["Nadi: classify<br/>FinBERT, or fine-tuned weights via model_dir<br/>on retune: template param swap, or Ollama rewrite<br/>from code_notes — validated on mock, else fallback<br/>writes predictions_test.csv"] --> S
+    S["Sabina: evaluate<br/>deterministic metrics, LLM polishes reason + code_notes<br/>writes evaluation_report.json"] --> G
 
-    G{"Jack: gate<br/>accuracy ≥ 0.60?<br/>cap hit? converged?"}
-    G -- "retune: writes retune_request.json<br/>(params from schedule + code_notes)" --> R
-    R["Nadi regenerates classifier<br/>template params swap, or<br/>Ollama rewrite of classify() when<br/>code_notes present + USE_OLLAMA<br/>→ validated on mock, else fallback"] --> S
+    G{"Jack: gate<br/>accuracy at least 0.60? cap hit? converged?"}
+    G -->|retune| R
+    R["Jack writes retune_request.json<br/>params from schedule, code_notes passed through"] --> N
 
-    G -- "proceed: writes sample_for_explanation.csv" --> F
+    G -->|proceed| P
+    P["Jack writes sample_for_explanation.csv"] --> F
     F["Freddi: explain<br/>Ollama justification per row<br/>writes explanations.csv"] --> Z
-    Z["Jack: finalize<br/>final_results.csv + final_report.json"] --> E([END])
+    Z["Jack: finalize<br/>writes final_results.csv + final_report.json"] --> E([END])
 ```
 
 ## Gate rules (unchanged)
