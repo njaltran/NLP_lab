@@ -142,12 +142,13 @@ class Agents:
 
 
 def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=None,
-                   sample_size=300, checkpointer=None):
+                   dataset_end=None, sample_size=300, checkpointer=None):
     """Compile the unified pipeline graph. `agents` supplies the five agents (real
     or fake); `threshold` is Aurora's labelling band; `data_dir` overrides where
     Aurora reads fnspid_raw.csv (defaults to the repo `data/`); `model_dir`, when
     set, is handed to Nadi so the classifier loads fine-tuned weights instead of
-    pretrained FinBERT (opt-in — omitted means today's behaviour); `sample_size`
+    pretrained FinBERT (opt-in — omitted means today's behaviour); `dataset_end`
+    (YYYY-MM-DD) drops later rows before Aurora's train/test split; `sample_size`
     is how many rows `select_best` redraws for the explanation sample. The node
     functions close over these, so no non-serialisable objects live in the graph
     state.
@@ -158,6 +159,8 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
         """Aurora: build the labelled dataset. Runs once, before the loop.
         Cleanup runs only after she succeeds (see docs/retune_loop.md)."""
         extra = {"data_dir": data_dir} if data_dir else {}
+        if dataset_end:
+            extra["dataset_end"] = dataset_end
         processed = agents.aurora.run(threshold=threshold, **extra)["processed_data_path"]
         clean_outputs()
         return {"processed_data_path": processed}
@@ -265,7 +268,7 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
 
 def run(*, threshold=0.01, target_accuracy=0.60, max_iterations=5, patience=2,
         min_delta=0.01, sample_size=300, use_ollama=True, data_dir=None,
-        model_dir=None) -> dict:
+        model_dir=None, dataset_end=None) -> dict:
     """Build the pipeline with real agents and run it once end to end, returning the
     final graph state. This is the entry point `main.py` calls."""
     from langgraph.checkpoint.memory import MemorySaver
@@ -274,8 +277,8 @@ def run(*, threshold=0.01, target_accuracy=0.60, max_iterations=5, patience=2,
                           patience=patience, min_delta=min_delta, sample_size=sample_size,
                           use_ollama=use_ollama)
     graph = build_pipeline(agents, threshold=threshold, data_dir=data_dir,
-                           model_dir=model_dir, sample_size=sample_size,
-                           checkpointer=MemorySaver())
+                           model_dir=model_dir, dataset_end=dataset_end,
+                           sample_size=sample_size, checkpointer=MemorySaver())
     return graph.invoke(
         {"retune_request_path": None},
         {"configurable": {"thread_id": "pipeline"}, "recursion_limit": RECURSION_LIMIT},

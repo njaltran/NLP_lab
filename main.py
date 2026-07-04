@@ -28,6 +28,10 @@ def main():
     p.add_argument("--model-dir", default=None,
                    help="fine-tuned weights folder for Nadi (e.g. outputs/finbert_finetuned); "
                         "omitted = pretrained FinBERT")
+    p.add_argument("--dataset-end", default=None, metavar="YYYY-MM-DD",
+                   help="drop rows after this date before splitting (e.g. 2019-12-31 "
+                        "keeps the COVID regime out of the test window, matching the "
+                        "fine-tuned model's training data)")
     args = p.parse_args()
 
     load_dotenv()  # make .env secrets (e.g. HF_TOKEN) visible to the agents
@@ -35,7 +39,7 @@ def main():
                 max_iterations=args.max_iterations, patience=args.patience,
                 min_delta=args.min_delta, sample_size=args.sample_size,
                 use_ollama=not args.no_ollama, data_dir=args.data_dir,
-                model_dir=args.model_dir)
+                model_dir=args.model_dir, dataset_end=args.dataset_end)
     print(f"\n[main] done -- {final['final_action']} at iteration "
           f"{final['iteration']}. Outputs in {OUT}/")
 
