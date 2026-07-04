@@ -88,7 +88,7 @@ class MarkedNadi(FakeNadi):
         return out
 
 
-def _run_pipeline(nadi, sabina, *, max_iterations=9, **build_kwargs):
+def _run_pipeline(nadi, sabina, *, aurora=None, max_iterations=9, **build_kwargs):
     """Build the graph around fakes for the heavy agents plus the real Manager
     and offline Freddi, and drive it once end to end."""
     import agents.pipeline_graph as pg
@@ -97,7 +97,7 @@ def _run_pipeline(nadi, sabina, *, max_iterations=9, **build_kwargs):
     from langgraph.checkpoint.memory import MemorySaver
 
     agents = pg.Agents(
-        aurora=FakeAurora(), nadi=nadi, sabina=sabina,
+        aurora=aurora or FakeAurora(), nadi=nadi, sabina=sabina,
         manager=ManagerAgent(predictions_path=pg.PREDS, target_accuracy=0.60,
                              max_iterations=max_iterations, patience=2, min_delta=0.01),
         freddi=ExplanationAgent(use_ollama=False, output_path=pg.EXPL),
@@ -163,6 +163,23 @@ def test_clean_outputs_removes_stale_loop_artifacts(tmp_path, monkeypatch):
     assert not (out / "classifier_history").exists()
     assert (out / "finetune_report.json").exists()
     assert (out / "finbert_finetuned" / "model.safetensors").exists()
+
+
+@needs_langgraph
+def test_failed_processing_keeps_previous_runs_outputs(tmp_path, monkeypatch):
+    """Cleanup runs only after Aurora succeeds — a failed start must not wipe
+    the previous run's deliverables."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "outputs").mkdir()
+    (tmp_path / "outputs" / "final_report.json").write_text("previous run")
+
+    class FailingAurora:
+        def run(self, **kwargs):
+            raise FileNotFoundError("fnspid_raw.csv not found")
+
+    with pytest.raises(FileNotFoundError):
+        _run_pipeline(FakeNadi(), FakeSabina(), aurora=FailingAurora())
+    assert (tmp_path / "outputs" / "final_report.json").read_text() == "previous run"
 
 
 @needs_langgraph

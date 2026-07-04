@@ -155,9 +155,11 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
     from langgraph.graph import StateGraph, START, END
 
     def process(state: PipelineState) -> dict:
-        """Aurora: build the labelled dataset. Runs once, before the loop."""
+        """Aurora: build the labelled dataset. Runs once, before the loop.
+        Cleanup runs only after she succeeds (see docs/retune_loop.md)."""
         extra = {"data_dir": data_dir} if data_dir else {}
         processed = agents.aurora.run(threshold=threshold, **extra)["processed_data_path"]
+        clean_outputs()
         return {"processed_data_path": processed}
 
     def classify(state: PipelineState) -> dict:
@@ -254,7 +256,6 @@ def run(*, threshold=0.01, target_accuracy=0.60, max_iterations=5, patience=2,
     final graph state. This is the entry point `main.py` calls."""
     from langgraph.checkpoint.memory import MemorySaver
 
-    clean_outputs()  # a fresh run must not inherit the previous run's loop files
     agents = Agents.build(target_accuracy=target_accuracy, max_iterations=max_iterations,
                           patience=patience, min_delta=min_delta, sample_size=sample_size,
                           use_ollama=use_ollama)

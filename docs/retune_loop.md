@@ -18,8 +18,10 @@ finalize (once Freddi's explanations are back).
 - **`model_dir` is an opt-in flag.** `uv run main.py --model-dir
   outputs/finbert_finetuned` hands the fine-tuned weights folder through the
   pipeline to Nadi's node. Omitted (the default) means pretrained FinBERT —
-  the current fine-tune underperforms the all-neutral baseline, so it stays
-  off unless explicitly requested.
+  the current fine-tune beats pretrained on the COVID test window but still
+  trails the random baseline (0.33) and the 0.60 target (see
+  [`finetune_runs.md`](./finetune_runs.md)), so it stays off unless
+  explicitly requested.
 
 ## Flowchart
 
@@ -51,8 +53,14 @@ flowchart TD
   best iteration's params and perturbs one knob.
 - Aggregate accuracy can't clear the target while any class sits below the
   per-class recall floor (0.05) — an all-neutral collapse no longer "passes".
-- Each `main.py` run starts by clearing the previous run's loop artifacts from
-  `outputs/` (fine-tuned weights and the finetune report are kept).
+  Known limit: Sabina reports 0.0 for a class with zero rows in the test set,
+  indistinguishable from a real collapse — a test window missing a label can
+  never clear the target and exits via cap/convergence instead. Needs
+  per-class support in `evaluation_report.json` to fix (Sabina's lane).
+- Each run clears the previous run's loop artifacts from `outputs/` once
+  Aurora's processing succeeds — a run that dies on its inputs leaves the
+  previous deliverables intact (fine-tuned weights and the finetune report
+  are always kept).
 - Proceed fires on any of: target accuracy (0.60) cleared, iteration cap (5)
   hit, or convergence — the best of the last 2 iterations gained less than
   0.01 over the best before them.

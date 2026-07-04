@@ -239,18 +239,22 @@ def test_finalize_pass_does_not_duplicate_accuracy_history(proceed_report):
     assert len(out["accuracy_history"]) == 2  # retune + proceed; finalize adds nothing
 
 
+# Above-target accuracy with a collapsed class: Sabina recommends proceed (so no
+# suggested_params), but the gate's floor must force a retune.
+COLLAPSED_STATE = {
+    "evaluation_report": {
+        "accuracy": 0.65,
+        "class_accuracy": {"up": 0.0, "down": 0.10, "neutral": 0.95},
+        "proposal": {"recommended_action": "proceed"},
+    },
+    "target_accuracy": 0.60, "max_iterations": 5,
+}
+
+
 def test_class_collapse_blocks_cleared_target():
     """Aggregate accuracy above target must not clear the gate when a class has
     collapsed to (near) zero recall — that run shipped up=0.0 while 'passing'."""
-    state = {
-        "evaluation_report": {
-            "accuracy": 0.65,
-            "class_accuracy": {"up": 0.0, "down": 0.10, "neutral": 0.95},
-            "proposal": {"recommended_action": "proceed"},
-        },
-        "target_accuracy": 0.60, "max_iterations": 5,
-    }
-    out = jm.decide(state)
+    out = jm.decide(COLLAPSED_STATE)
     assert out["final_action"] == "retune"
 
 
@@ -282,6 +286,36 @@ def test_no_regression_keeps_walking_schedule():
     tried = [{"threshold": 0.45, "boost_factor": 1.25}]
     history = [0.21, 0.30]               # improving — no revert
     assert jm._next_params(tried, history) == jm._RETUNE_SCHEDULE[1]
+
+
+def test_collapse_forced_first_retune_takes_schedule_not_empty_params():
+    """When the collapse floor forces a retune on a pass Sabina recommended to
+    proceed, her proposal carries no suggested_params — the gate must fall back
+    to the schedule instead of 'accepting' {} and re-running Nadi's defaults."""
+    out = jm.decide(COLLAPSED_STATE)
+    assert out["decision"] == "override"
+    assert out["tried_params"][-1] == jm._RETUNE_SCHEDULE[0]  # not {}
+
+
+def test_perturb_candidates_carry_full_params():
+    """A perturbation of iteration 1 (Nadi's defaults, no tried entry) must still
+    emit both knobs — a single-key dict makes _same() falsely match schedule
+    entries that share only that key."""
+    tried = [{"threshold": 0.45, "boost_factor": 1.25}]
+    history = [0.39, 0.20]               # best was iteration 1 (defaults), then crash
+    params = jm._next_params(tried, history)
+    assert {"threshold", "boost_factor"} <= set(params)
+
+
+def test_perturb_boost_is_clamped():
+    base = {"threshold": 0.20, "boost_factor": 1.95}
+    # Both threshold perturbations of the best entry already tried — the boost
+    # candidate is next and must not exceed _BOOST_MAX.
+    tried = [base, {"threshold": 0.15, "boost_factor": 1.95},
+             {"threshold": 0.25, "boost_factor": 1.95}]
+    history = [0.10, 0.39, 0.20, 0.20]   # best at index 1 (from tried[0])
+    params = jm._next_params(tried, history)
+    assert params["boost_factor"] == jm._BOOST_MAX
 
 
 def test_accuracy_history_accumulates_one_per_iteration():

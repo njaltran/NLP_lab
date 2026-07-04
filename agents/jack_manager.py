@@ -110,6 +110,8 @@ _RETUNE_SCHEDULE = [
 _REGRESSION_DELTA = 0.05
 _THRESHOLD_STEP = 0.05
 _BOOST_STEP = 0.10
+_BOOST_MAX = 2.0   # threshold is clamped below; without a ceiling here, repeated
+                   # perturbs would escalate the boost without bound
 
 
 def _same(a: dict, b: dict) -> bool:
@@ -136,12 +138,16 @@ def _next_params(tried: list, history: list = ()) -> dict:
             # later one on the next `tried` entry.
             per_iteration = [{}] + list(tried)
             base = per_iteration[best] if best < len(per_iteration) else {}
+            # Fill both knobs with Nadi's defaults so every candidate carries
+            # full params: a partial dict (e.g. boost only) would make _same()
+            # falsely match schedule entries that share just that one key.
             threshold = base.get("threshold", 0.5)
             boost = base.get("boost_factor", 1.25)
+            base = {**base, "threshold": threshold, "boost_factor": boost}
             candidates = [
                 {**base, "threshold": round(max(0.05, threshold - _THRESHOLD_STEP), 2)},
                 {**base, "threshold": round(min(0.60, threshold + _THRESHOLD_STEP), 2)},
-                {**base, "boost_factor": round(boost + _BOOST_STEP, 2)},
+                {**base, "boost_factor": round(min(_BOOST_MAX, boost + _BOOST_STEP), 2)},
             ]
             for candidate in candidates:
                 if not any(_same(candidate, t) for t in tried):
@@ -155,7 +161,10 @@ def _next_params(tried: list, history: list = ()) -> dict:
 
 def _is_collapsed(report: dict, floor: float) -> bool:
     """True when any class's recall sits below `floor` — the aggregate accuracy
-    is then a degenerate win (e.g. everything predicted neutral)."""
+    is then a degenerate win (e.g. everything predicted neutral).
+
+    Note: Sabina reports 0.0 for a class absent from the test set, which reads
+    as a collapse here — see the caveat in docs/retune_loop.md."""
     class_accuracy = report.get("class_accuracy", {})
     return bool(class_accuracy) and min(class_accuracy.values()) < floor
 
@@ -237,10 +246,13 @@ def decide(state: ManagerState) -> dict:
         # First retune trusts Sabina's proposal as-is (accept); every retune after
         # that adapts the params (override), because a repeat proposal has already
         # failed once. `tried_params` records what we actually used either way.
+        # A proposal without suggested_params (Sabina recommended proceed but the
+        # collapse floor forced a retune) has nothing to accept — take the
+        # schedule instead of re-running Nadi's defaults.
         proposal = report.get("proposal", {})
         tried = state.get("tried_params", [])
-        if not tried:
-            used = proposal.get("suggested_params", {})
+        if not tried and proposal.get("suggested_params"):
+            used = proposal["suggested_params"]
             out["decision"], out["overrides"] = "accept", {}
         else:
             used = _next_params(tried, history)
