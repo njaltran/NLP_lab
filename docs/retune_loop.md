@@ -30,18 +30,27 @@ flowchart TD
     A["Aurora: process<br/>FNSPID + yfinance<br/>writes processed_data.csv, split train/test by date"] --> N
 
     N["Nadi: classify<br/>FinBERT, or fine-tuned weights via model_dir<br/>on retune: template param swap, or Ollama rewrite<br/>from code_notes — validated on mock, else fallback<br/>writes predictions_test.csv"] --> S
-    S["Sabina: evaluate<br/>deterministic metrics, LLM polishes reason + code_notes<br/>writes evaluation_report.json"] --> G
+    S["Sabina: evaluate on the VAL split<br/>deterministic metrics, LLM polishes reason + code_notes<br/>writes evaluation_report.json"] --> G
 
     G{"Jack: gate<br/>accuracy at least 0.60? cap hit? converged?"}
     G -->|retune| R
     R["Jack writes retune_request.json<br/>params from schedule, code_notes passed through"] --> N
 
     G -->|proceed| B
-    B["select_best: if an earlier iteration scored higher,<br/>restore its snapshot from outputs/best/<br/>and redraw the explanation sample"] --> P
-    P["Jack writes sample_for_explanation.csv"] --> F
+    B["select_best: if an earlier iteration scored higher,<br/>restore its snapshot from outputs/best/<br/>and redraw the explanation sample"] --> ET
+    ET["Sabina: evaluate on the TEST split, once<br/>honest held-out number for the finals"] --> P
+    P["Jack writes sample_for_explanation.csv (test rows)"] --> F
     F["Freddi: explain<br/>Ollama justification per row<br/>writes explanations.csv"] --> Z
     Z["Jack: finalize<br/>writes final_results.csv + final_report.json"] --> E([END])
 ```
+
+## Validation/test separation
+
+The loop scores itself on the `val` rows (last 10% of training dates, assigned
+by Aurora); the `test` rows are scored exactly once, after `select_best`, for
+the final report. Before this, eight rounds of threshold tuning were measured
+against the same test set they were later judged on — the final accuracy was
+partly the loop overfitting the test rows.
 
 ## Gate rules (unchanged)
 

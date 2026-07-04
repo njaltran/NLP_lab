@@ -54,13 +54,22 @@ class FakeNadi:
 class FakeSabina:
     """Emits below-target reports, forcing the Manager to retune until it
     converges. `accs` optionally scripts one accuracy per pass (default: flat
-    0.37)."""
+    0.37), keyed by MarkedNadi's fake_pass stamp when present so re-scoring
+    restored predictions reproduces that pass's accuracy. Records which
+    eval_split each call scored."""
     def __init__(self, accs=None):
         self.accs = accs
         self.calls = 0
+        self.eval_splits = []
 
-    def run(self, *, predictions, classifier_code):
-        acc = self.accs[self.calls] if self.accs else 0.37
+    def run(self, *, predictions, classifier_code, eval_split="test"):
+        self.eval_splits.append(eval_split)
+        if self.accs:
+            df = pd.read_csv(predictions)
+            pass_no = int(df["fake_pass"].iloc[0]) if "fake_pass" in df.columns else self.calls + 1
+            acc = self.accs[pass_no - 1]
+        else:
+            acc = 0.37
         self.calls += 1
         report = {
             "accuracy": acc,
@@ -187,12 +196,16 @@ def test_graph_cycles_then_finalizes(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "outputs").mkdir()
 
-    nadi = FakeNadi()
-    final = _run_pipeline(nadi, FakeSabina())
+    nadi, sabina = FakeNadi(), FakeSabina()
+    final = _run_pipeline(nadi, sabina)
 
     # Proceeded via convergence (not the cap of 9), after cycling the classifier.
     assert final["final_action"] == "proceed"
     assert nadi.calls >= 2, "classifier should have run more than once (the loop cycled)"
+
+    # Every loop evaluation scored the val split; the single final pass scored test.
+    assert sabina.eval_splits[-1] == "test"
+    assert set(sabina.eval_splits[:-1]) == {"val"}
 
     # The full set of terminal contract files exists.
     for name in ("retune_request.json", "sample_for_explanation.csv", "explanations.csv",

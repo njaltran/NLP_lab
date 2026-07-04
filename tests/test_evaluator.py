@@ -31,9 +31,10 @@ def test_build_report_matches_mock_data_contract():
 
     report = se.build_report(rows, code)
 
-    assert report["accuracy"] == 0.67
+    assert report["accuracy"] == 0.60
     assert report["below_threshold"] is False
-    assert report["class_accuracy"] == {"up": 0.80, "down": 0.75, "neutral": 0.33}
+    assert report["eval_split"] == "test"
+    assert report["class_accuracy"] == {"up": 0.67, "down": 0.75, "neutral": 0.33}
     assert report["misclassified_count"] == 4
     assert report["misclassified_ids"] == [
         "FNSPID_00006",
@@ -44,7 +45,7 @@ def test_build_report_matches_mock_data_contract():
     assert report["proposal"] == {
         "recommended_action": "proceed",
         "reason": (
-            "accuracy 0.67 clears the 0.60 target; neutral class is weakest "
+            "accuracy 0.60 clears the 0.60 target; neutral class is weakest "
             "(0.33) but the iteration budget favours proceeding"
         ),
         "focus_labels": ["neutral"],
@@ -140,17 +141,57 @@ def test_classifier_summary_uses_generated_model_constant():
     assert summary["model_dir"] == '"outputs/model"'
 
 
-def test_validation_rejects_non_test_rows():
-    """Rows outside the test split should be rejected."""
+def test_validation_rejects_train_rows():
+    """Held-out rows are val or test; train rows must be rejected."""
     rows = _load_mock_rows()
     rows[0]["split"] = "train"
 
     try:
         se.validate_predictions(rows)
     except ValueError as error:
-        assert "split must be test" in str(error)
+        assert "split must be val or test" in str(error)
     else:
         assert False, "Expected validate_predictions to reject train split rows"
+
+
+def test_build_report_scores_requested_split_only():
+    """eval_split=val must score ONLY the val rows — the loop's own scoring
+    set — leaving the test rows untouched until the final report."""
+    rows = _load_mock_rows()
+    code = se._read_code(CLASSIFIER)
+    val_rows = [r for r in rows if r["split"] == "val"]
+    assert val_rows, "mock predictions must ship val rows"
+
+    report = se.build_report(rows, code, eval_split="val")
+
+    # Both mock val rows are correct predictions — exact values, fixed data.
+    assert report["eval_split"] == "val"
+    assert report["accuracy"] == 1.0
+    assert report["misclassified_count"] == 0
+    assert report["misclassified_ids"] == []
+
+
+def test_build_report_raises_when_split_absent():
+    """Silently scoring the wrong split would defeat the val/test separation —
+    a missing split must be a hard error."""
+    rows = [dict(r, split="test") for r in _load_mock_rows()]
+    code = se._read_code(CLASSIFIER)
+
+    try:
+        se.build_report(rows, code, eval_split="val")
+    except ValueError as error:
+        assert "no split=val rows" in str(error)
+    else:
+        assert False, "Expected build_report to reject missing val rows"
+
+
+def test_code_notes_flag_class_collapse():
+    """A class with near-zero recall must be called out — aggregate accuracy
+    alone hides a classifier that predicts one class for everything."""
+    class_accuracy = {"up": 0.97, "down": 0.0, "neutral": 0.04}
+    notes = se.review_classifier_code("THRESHOLD = 0.2", class_accuracy)
+    assert "class collapse" in notes
+    assert "down" in notes and "neutral" in notes
 
 
 def test_llm_review_can_supply_valid_judgment_text():
@@ -207,7 +248,7 @@ def test_llm_review_cannot_change_control_fields():
     assert report["below_threshold"] is False
     assert report["proposal"]["recommended_action"] == "proceed"
     assert report["proposal"]["suggested_params"] == {}
-    assert report["proposal"]["reason"].startswith("accuracy 0.67 clears")
+    assert report["proposal"]["reason"].startswith("accuracy 0.60 clears")
 
 
 def test_fenced_json_review_can_be_parsed_and_applied():
@@ -244,7 +285,7 @@ def test_invalid_llm_json_falls_back_to_base_proposal():
     report = se.build_report(rows, code, llm_fn=lambda _: "Here is my answer: proceed")
 
     assert report["proposal"]["recommended_action"] == "proceed"
-    assert report["proposal"]["reason"].startswith("accuracy 0.67 clears")
+    assert report["proposal"]["reason"].startswith("accuracy 0.60 clears")
 
 
 def test_prompt_excludes_misclassified_ids_and_full_source():
@@ -299,7 +340,7 @@ def test_llm_network_failure_falls_back_to_base_proposal():
     report = se.build_report(rows, code, llm_fn=dead_ollama)
 
     assert report["proposal"]["recommended_action"] == "proceed"
-    assert report["proposal"]["reason"].startswith("accuracy 0.67 clears")
+    assert report["proposal"]["reason"].startswith("accuracy 0.60 clears")
 
 
 def test_llm_review_applies_on_retune_without_touching_params():
