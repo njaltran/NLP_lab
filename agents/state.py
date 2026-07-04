@@ -24,6 +24,10 @@ class PipelineState(TypedDict, total=False):
     # ── Handoff 2: Classifier → Evaluator ───────────────────────────────────
     # docs/data_contracts.md §Handoff 2
     # Prof note: Sabina gets code + results, not only predictions CSV
+    model_dir: str | None       # optional fine-tuned weights folder; when set and it
+                                # exists, the classifier loads it instead of pretrained
+    llm_fn: object              # optional injected LLM callable used by the classifier's
+                                # agentic code-gen (tests pass a fake; None = real Ollama)
     predictions_path: str       # absolute path to predictions_test.csv
     classifier_code_path: str   # absolute path to classifier.py (the generated script)
     classifier_history_path: str  # absolute path to this iteration's archived copy

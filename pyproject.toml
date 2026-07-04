@@ -27,3 +27,5 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]        # import `agents` package from repo root
+markers = ["slow: tests that download models or train (deselected by default)"]
+addopts = "-m 'not slow'"  # run `uv run pytest -m slow` to include them
