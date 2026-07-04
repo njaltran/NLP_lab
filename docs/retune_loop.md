@@ -34,7 +34,8 @@ flowchart TD
     G -->|retune| R
     R["Jack writes retune_request.json<br/>params from schedule, code_notes passed through"] --> N
 
-    G -->|proceed| P
+    G -->|proceed| B
+    B["select_best: if an earlier iteration scored higher,<br/>restore its snapshot from outputs/best/<br/>and redraw the explanation sample"] --> P
     P["Jack writes sample_for_explanation.csv"] --> F
     F["Freddi: explain<br/>Ollama justification per row<br/>writes explanations.csv"] --> Z
     Z["Jack: finalize<br/>writes final_results.csv + final_report.json"] --> E([END])
@@ -48,3 +49,7 @@ flowchart TD
 - Proceed fires on any of: target accuracy (0.60) cleared, iteration cap (5)
   hit, or convergence — the best of the last 2 iterations gained less than
   0.01 over the best before them.
+- On proceed, `select_best` restores the highest-accuracy iteration's
+  artifacts (predictions/report/classifier snapshotted to `outputs/best/` on
+  each new best), so a regressed final retune can't ship worse results than an
+  earlier pass — accuracy did regress 0.39 → 0.23 on the 2026-07-04 run.
