@@ -20,7 +20,7 @@ changes. The retune loop becomes a real graph edge; that was the goal.
 ## Graph shape
 
     START → process → classify → evaluate → gate ─(retune)→ classify   [CYCLE]
-                                              └(proceed)→ select_best → explain → finalize → END
+                                              └(proceed)→ select_best → evaluate_test → explain → finalize → END
 
 `evaluate` snapshots each new-best iteration's artifacts into `outputs/best/`;
 `select_best` restores that snapshot (and redraws the explanation sample) when the
@@ -173,17 +173,21 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
         return {}
 
     def evaluate(state: PipelineState) -> dict:
-        """Sabina: score the predictions and write evaluation_report.json. Also
-        snapshots this pass's artifacts into BEST_DIR whenever its score (accuracy,
-        collapse-penalized by `report_score` — same rule as the gate's floor) sets
-        a new best, so `select_best` can restore them if later retunes regress."""
-        agents.sabina.run(predictions=PREDS, classifier_code=CODE)
+        """Sabina: score the predictions on the VAL split — retune decisions must
+        never see the test rows, or the loop tunes against (overfits) the final
+        measurement. Also snapshots this pass's artifacts into BEST_DIR whenever
+        its score (accuracy, collapse-penalized by `report_score` — same rule as
+        the gate's floor) sets a new best, so `select_best` can restore them if
+        later retunes regress."""
+        agents.sabina.run(predictions=PREDS, classifier_code=CODE, eval_split="val")
         with open(EVAL, encoding="utf-8") as f:
             score = report_score(json.load(f))
         out = {"last_score": score}
         if score > state.get("best_score", float("-inf")):
             os.makedirs(BEST_DIR, exist_ok=True)
-            for path in (PREDS, EVAL, CODE):
+            # PREDS + CODE only: the finals' report comes from `evaluate_test`
+            # (test split), so snapshotting the val report would be dead weight.
+            for path in (PREDS, CODE):
                 shutil.copy2(path, os.path.join(BEST_DIR, os.path.basename(path)))
             out["best_score"] = score
         return out
@@ -210,11 +214,19 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
         best, last = state.get("best_score", float("-inf")), state.get("last_score", float("-inf"))
         if best <= last:
             return {}
-        for path in (PREDS, EVAL, CODE):
+        for path in (PREDS, CODE):
             shutil.copy2(os.path.join(BEST_DIR, os.path.basename(path)), path)
         write_sample(PREDS, sample_size)
         print(f"[pipeline] last iteration regressed (score {last:.2f}) — restored best "
               f"iteration's artifacts (score {best:.2f}) for explanation + finals")
+        return {}
+
+    def evaluate_test(state: PipelineState) -> dict:
+        """Sabina one last time, now on the TEST split: the loop tuned and
+        selected on val, so the test rows are scored exactly once, here — an
+        honest held-out number. Overwrites EVAL, which finalize reads for
+        final_report.json (the finalize entry point does not re-run the gate)."""
+        agents.sabina.run(predictions=PREDS, classifier_code=CODE, eval_split="test")
         return {}
 
     def explain(state: PipelineState) -> dict:
@@ -235,7 +247,8 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
 
     b = StateGraph(PipelineState)
     for name, fn in [("process", process), ("classify", classify), ("evaluate", evaluate),
-                     ("gate", gate), ("select_best", select_best), ("explain", explain),
+                     ("gate", gate), ("select_best", select_best),
+                     ("evaluate_test", evaluate_test), ("explain", explain),
                      ("finalize", finalize)]:
         b.add_node(name, fn)
     b.add_edge(START, "process")
@@ -243,7 +256,8 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
     b.add_edge("classify", "evaluate")
     b.add_edge("evaluate", "gate")
     b.add_conditional_edges("gate", route, {"retune": "classify", "proceed": "select_best"})
-    b.add_edge("select_best", "explain")
+    b.add_edge("select_best", "evaluate_test")
+    b.add_edge("evaluate_test", "explain")
     b.add_edge("explain", "finalize")
     b.add_edge("finalize", END)
     return b.compile(checkpointer=checkpointer)

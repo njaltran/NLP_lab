@@ -24,15 +24,15 @@ Built by joining FNSPID headlines to yfinance prices on `ticker` + publication d
 | price_t1 | float | 125.12 | closing price on next trading day (from yfinance) |
 | pct_change | float | 3.38 | percentage change T to T+1 |
 | label | string | up | >+1% = up, <-1% = down, in between = neutral |
-| split | string | train | time-based train/test split assigned by Aurora: earliest 80% of dates = `train`, the rest = `test`. Date-based (not random) so no future information leaks into training. Nadi trains on `split=train` rows and predicts `split=test` rows only |
+| split | string | train | time-based train/val/test split assigned by Aurora: earliest 80% of dates = the training period, the rest = `test`; the last 10% of training dates are `val`. Date-based (not random) so no future information leaks into training. Nadi trains on `split=train` rows and predicts the `val` + `test` rows |
 
-**Train/test split.** The `split` column marks each row `train` or `test` by date — the earliest 80% of dates are `train`, the rest `test`. Aurora only *labels* the split (one file, one column); the classifier *uses* it (train on train rows, predict test rows). Optionally, a `dataset_end` date drops later rows before splitting — the production run uses `2019-12-31` so the COVID crash (a structural break) stays out of the test window and held-out accuracy reflects the normal regime.
+**Train/val/test split.** The `split` column marks each row `train`, `val`, or `test` by date — the earliest 80% of dates form the training period (whose last 10% of dates become `val`), the rest are `test`. Sabina scores the retune loop on the `val` rows and touches `test` exactly once for the final report, so the loop cannot overfit the test set. Aurora only *labels* the split (one file, one column); the classifier *uses* it (train on train rows, predict test rows). Optionally, a `dataset_end` date drops later rows before splitting — the production run uses `2019-12-31` so the COVID crash (a structural break) stays out of the test window and held-out accuracy reflects the normal regime.
 
 ## Handoff 2 — Classifier Agent (Nadi) → Evaluator Agent (Sabina)
 
 **Filenames:** `classifier.py` and `predictions_test.csv`
 
-Nadi is a code-generation agent: it **generates the classifier as a Python script** (`classifier.py`), runs it on the test split, and passes both the generated code and its results to Sabina. Sabina reviews the code and scores the results — she does **not** re-execute the code.
+Nadi is a code-generation agent: it **generates the classifier as a Python script** (`classifier.py`), runs it on the held-out (val + test) rows, and passes both the generated code and its results to Sabina. Sabina reviews the code and scores the results — she does **not** re-execute the code.
 
 ### `classifier.py`
 
@@ -59,7 +59,7 @@ Nadi receives `processed_data.csv` from Aurora and adds the prediction columns. 
 | prob_up | float | 0.87 | **added by Nadi** — softmax probability for `up` |
 | prob_down | float | 0.05 | **added by Nadi** — softmax probability for `down` |
 | prob_neutral | float | 0.08 | **added by Nadi** — softmax probability for `neutral` (`prob_up + prob_down + prob_neutral ≈ 1`) |
-| split | string | test | **added by Nadi** — all rows in this file must be test rows only |
+| split | string | test | passed through from Handoff 1 — `val` or `test` rows only (train rows are never predicted). Sabina picks which split to score; Freddi's sample and the finals use the test rows |
 
 ## Handoff 3 — Evaluator Agent (Sabina) → Manager Agent (Jack)
 
@@ -74,6 +74,7 @@ Sabina scores the results, reviews `classifier.py`, and **makes a proposal**. Sh
 | class_accuracy | object | {"up": 0.71, "down": 0.58, "neutral": 0.61} | accuracy per label |
 | misclassified_count | integer | 148 | total number of wrong predictions |
 | misclassified_ids | list | ["FNSPID_00423", ...] | article_ids of wrong predictions |
+| eval_split | string | val | which held-out split the metrics were computed on: `val` for retune-loop reports, `test` for the one final report |
 | proposal | object | see below | **Sabina's recommendation** — Jack decides whether to apply it |
 
 ### `proposal` object

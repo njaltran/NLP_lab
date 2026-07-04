@@ -316,6 +316,10 @@ def write_sample(predictions_path: str, sample_size: int = 300) -> int:
     import pandas as pd
 
     preds = pd.read_csv(predictions_path)
+    # Predictions carry val + test rows; Freddi explains held-out TEST
+    # predictions only (the val rows exist for the loop's own scoring).
+    if "split" in preds.columns:
+        preds = preds[preds["split"] == "test"]
     sample = (preds[["article_id", "article_title", "predicted_label", "label",
                      "confidence", "prob_up", "prob_down", "prob_neutral"]]
               .rename(columns={"label": "actual_label"}))
@@ -342,6 +346,8 @@ def finalize(state: ManagerState) -> dict:
     import pandas as pd
 
     preds = pd.read_csv(state.get("predictions_path", "mock_data/predictions_test.csv"))
+    if "split" in preds.columns:                  # finals report the TEST rows only
+        preds = preds[preds["split"] == "test"]
     expl = pd.read_csv(state["explanations_path"])[["article_id", "explanation", "manual_score"]]
     final = preds.merge(expl, on="article_id", how="left")[[
         "article_id", "date", "ticker", "article_title", "price_t", "price_t1",
