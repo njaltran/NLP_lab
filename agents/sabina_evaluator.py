@@ -534,6 +534,11 @@ def write_report(state: EvaluatorState) -> dict:
         "evaluation_report.json",
     )
     _write_json(output_path, state["report"])
+    split = state["report"].get("eval_split")
+    if split in {"val", "test"}:
+        split_name = "validation" if split == "val" else "test"
+        split_path = os.path.join(os.path.dirname(output_path), f"{split_name}_report.json")
+        _write_json(split_path, state["report"])
     return {"output_path": output_path}
 
 

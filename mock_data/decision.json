@@ -2,6 +2,8 @@
   "iteration": 2,
   "decision": "accept",
   "final_action": "proceed",
+  "eval_split": "val",
+  "validation_accuracy": 0.67,
   "based_on_proposal": {
     "recommended_action": "proceed",
     "reason": "accuracy 0.67 clears the 0.60 target; neutral class is weakest (0.33) but the iteration budget favours proceeding",
@@ -13,5 +15,5 @@
   },
   "overrides": {},
   "notes": "cycle 2 accuracy 0.67 is above 0.60; accepting Sabina's proposal to proceed to explanation",
-  "accuracy_history": [0.55, 0.67]
+  "validation_accuracy_history": [0.55, 0.67]
 }

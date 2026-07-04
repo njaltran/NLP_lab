@@ -117,9 +117,14 @@ def test_outputs_match_contract(outdir, proceed_report):
     assert set(fin.label) <= {"up", "down", "neutral"}
 
     rep = json.loads((outdir / "final_report.json").read_text())
-    assert set(rep) == {
+    assert {
         "final_accuracy", "loop_iterations", "class_accuracy",
-        "test_set_size", "explanations_generated", "manually_scored"}
+        "test_set_size", "explanations_generated", "manually_scored",
+        "eval_split", "final_test_accuracy", "test_class_accuracy",
+    } <= set(rep)
+    assert rep["eval_split"] == "test"
+    assert rep["final_test_accuracy"] == rep["final_accuracy"]
+    assert rep["test_class_accuracy"] == rep["class_accuracy"]
     assert rep["test_set_size"] == len(fin)
     assert rep["explanations_generated"] == int((fin.explanation.fillna("") != "").sum())
     assert rep["manually_scored"] == int(fin.manual_score.notna().sum())
@@ -328,16 +333,18 @@ def test_accuracy_history_accumulates_one_per_iteration():
     assert out["accuracy_history"] == [0.30, 0.40, 0.50]
 
 
-def test_decision_json_carries_accuracy_history(outdir):
-    """decision.json is overwritten every iteration, so accuracy_history is the
-    only on-disk record of the trend — verify it lands in the written file."""
+def test_decision_json_carries_validation_accuracy_history(outdir):
+    """decision.json keeps the validation trend under an explicit split name."""
     g, cfg = _graph(), {"configurable": {"thread_id": "hist-disk"}}
     base = {"target_accuracy": 0.60, "max_iterations": 9, "patience": 99, "min_delta": 0.0,
             "predictions_path": PRED}
     g.invoke({**base, "evaluation_report": _report(0.30)}, cfg)
     g.invoke({**base, "evaluation_report": _report(0.40)}, cfg)
     decision = json.loads((outdir / "decision.json").read_text())
-    assert decision["accuracy_history"] == [0.30, 0.40]
+    assert "accuracy_history" not in decision
+    assert decision["eval_split"] == "val"
+    assert decision["validation_accuracy"] == 0.40
+    assert decision["validation_accuracy_history"] == [0.30, 0.40]
 
 
 # --- reproducible sampling ------------------------------------------------

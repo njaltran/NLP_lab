@@ -84,18 +84,24 @@ def _test_rows(preds):
 
 def _write_decision(state: "ManagerState") -> None:
     """decision.json — Jack's record, written every iteration (Handoff 3b). The
-    file is overwritten each iteration, so `accuracy_history` (cumulative through
-    the current iteration) is the only place the per-iteration trend survives on
-    disk once the loop moves on."""
+    file is overwritten each iteration, so `validation_accuracy_history`
+    (cumulative through the current iteration) is the only place the validation
+    trend survives on disk once the loop moves on."""
     report = state["evaluation_report"]
+    eval_split = report.get("eval_split", "val")
+    accuracy = state.get("accuracy", report.get("accuracy"))
     _write_json("decision.json", {
         "iteration": state["iteration"],
         "decision": state["decision"],
         "final_action": state["final_action"],
+        "eval_split": eval_split,
+        "validation_accuracy": accuracy if eval_split == "val" else None,
         "based_on_proposal": report.get("proposal", {}),
         "overrides": state.get("overrides", {}),
         "notes": state["notes"],
-        "accuracy_history": state.get("accuracy_history", []),
+        "validation_accuracy_history": (
+            state.get("accuracy_history", []) if eval_split == "val" else []
+        ),
     })
 
 
@@ -359,9 +365,12 @@ def finalize(state: ManagerState) -> dict:
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     final.to_csv(os.path.join(OUTPUT_DIR, "final_results.csv"), index=False)
     _write_json("final_report.json", {
+        "eval_split": report.get("eval_split", "test"),
         "final_accuracy": report.get("accuracy"),
+        "final_test_accuracy": report.get("accuracy"),
         "loop_iterations": state["iteration"],
         "class_accuracy": report.get("class_accuracy", {}),
+        "test_class_accuracy": report.get("class_accuracy", {}),
         "test_set_size": int(len(final)),
         "explanations_generated": int((final["explanation"] != "").sum()),
         "manually_scored": int(final["manual_score"].notna().sum()),
@@ -418,7 +427,8 @@ def _llama_rationale(state: ManagerState) -> str:
                 {"role": "system", "content": RATIONALE_SYSTEM_PROMPT},
                 {"role": "user", "content": (
                     f"Decision: {state['final_action']} at iteration {state['iteration']}. "
-                    f"Test accuracy {state['accuracy']:.2f} vs target "
+                    f"{state['evaluation_report'].get('eval_split', 'validation')} "
+                    f"accuracy {state['accuracy']:.2f} vs target "
                     f"{state['target_accuracy']:.2f}. Evaluator proposal: {proposal}.")},
             ],
             max_tokens=160,

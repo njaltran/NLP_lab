@@ -100,10 +100,12 @@ Jack owns the threshold gate and the final call; Sabina only recommends. Jack ma
 | iteration | integer | 2 | loop counter, starts at 1 |
 | decision | string | accept | `accept` (use proposal as-is) or `override` (Jack changed it) |
 | final_action | string | retune | `retune` or `proceed` — what actually happens |
+| eval_split | string | val | split used for Jack's loop decision; currently `val` |
+| validation_accuracy | float | 0.51 | current validation accuracy for this iteration |
 | based_on_proposal | object | {...} | the `proposal` block from the report Jack decided on |
 | overrides | object | {"max_length": 256} | only if `decision = override` — fields Jack changed; empty object otherwise |
 | notes | string | iteration cap not reached; applying proposal | Jack's rationale |
-| accuracy_history | list of float | [0.42, 0.51, 0.60] | one accuracy per iteration so far, cumulative through this iteration — the file is overwritten each iteration, so this is the trend's only record on disk |
+| validation_accuracy_history | list of float | [0.42, 0.51, 0.60] | validation accuracy per iteration so far, cumulative through this iteration — the file is overwritten each iteration, so this is the trend's only record on disk |
 
 ### `retune_request.json` (Jack → Nadi, only when `final_action = retune`)
 

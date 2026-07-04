@@ -72,6 +72,23 @@ def test_report_written_to_evaluation_report_json():
     assert written == report
 
 
+def test_report_written_to_split_named_file():
+    """The evaluator also writes a human-clear split-specific report name."""
+    rows = se._read_predictions(PREDICTIONS)
+    code = se._read_code(CLASSIFIER)
+    report = se.build_report(rows, code, eval_split="val")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "evaluation_report.json"
+        se.write_report({"report": report, "output_path": str(out)})
+        named = Path(tmp) / "validation_report.json"
+
+        written = json.loads(named.read_text(encoding="utf-8"))
+
+    assert written["eval_split"] == "val"
+    assert written == report
+
+
 def test_low_accuracy_recommends_retune():
     """If accuracy is below 0.60, the proposal should recommend retuning."""
     rows = _load_mock_rows()
