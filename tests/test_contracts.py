@@ -16,7 +16,7 @@ def test_prediction_rows_validate_contract_columns_and_values():
     contracts.validate_prediction_rows(rows)
 
     rows[0]["split"] = "train"
-    with pytest.raises(ValueError, match="split must be test"):
+    with pytest.raises(ValueError, match="split must be val or test"):
         contracts.validate_prediction_rows(rows)
 
 
@@ -33,6 +33,11 @@ def test_explanation_sample_is_shaped_from_predictions(tmp_path):
     assert n == 3
     assert [*rows[0].keys()] == contracts.EXPLANATION_SAMPLE_COLUMNS
     assert all(row["actual_label"] in contracts.LABELS for row in rows)
+    test_ids = set(
+        pd.read_csv("mock_data/predictions_test.csv")
+        .query("split == 'test'")["article_id"]
+    )
+    assert {row["article_id"] for row in rows} <= test_ids
 
 
 def test_final_results_are_shaped_from_predictions_and_explanations():
@@ -44,3 +49,6 @@ def test_final_results_are_shaped_from_predictions_and_explanations():
     assert list(final.columns) == contracts.FINAL_RESULTS_COLUMNS
     assert final["explanation"].fillna("").ne("").any()
     assert set(final["label"]) <= set(contracts.LABELS)
+    assert len(final) == (
+        pd.read_csv("mock_data/predictions_test.csv")["split"] == "test"
+    ).sum()

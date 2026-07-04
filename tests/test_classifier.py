@@ -39,7 +39,9 @@ def test_classifier_agent_run(outdir):
     for col in expected_cols:
         assert col in df.columns
         
-    assert (df["split"] == "test").all()
+    # Held-out rows only: val (loop scoring) + test (final report); never train.
+    assert df["split"].isin(["val", "test"]).all()
+    assert (df["split"] == "test").any()
     assert set(df["predicted_label"]) <= {"up", "down", "neutral"}
 
 def test_classifier_agent_retune(outdir):

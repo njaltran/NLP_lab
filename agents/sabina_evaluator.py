@@ -6,6 +6,10 @@ Reads the Classifier Agent's `predictions_test.csv` and generated
 to review the classifier code and metrics, and writes the Manager Agent's input:
 `evaluation_report.json`.
 
+Scoring is split-aware: retune cycles are scored on the `val` rows so the loop
+cannot overfit the `test` rows, which are scored exactly once for the final
+report (`eval_split` parameter, recorded in the report).
+
 Exports
 -------
 EvaluatorAgent   Agent subclass — callers do EvaluatorAgent().run()
@@ -48,6 +52,7 @@ THRESHOLD_STEP = 0.05
 THRESHOLD_FLOOR = 0.20
 DEFAULT_MAX_LENGTH = 128
 FOCUS_MARGIN = 0.05
+CLASS_COLLAPSE_FLOOR = 0.05   # per-class recall below this = collapse, flagged in code_notes
 # Read once at import time so tests and demos get stable evaluator behavior.
 USE_OLLAMA = os.getenv("EVALUATOR_USE_OLLAMA", "false").lower() == "true"
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
@@ -70,6 +75,7 @@ class EvaluatorState(TypedDict, total=False):
     predictions_path: str
     classifier_code_path: str
     output_path: str
+    eval_split: str
     predictions: list[dict]
     code_text: str
     code_notes: str
@@ -171,6 +177,17 @@ def review_classifier_code(code_text: str, class_accuracy: dict) -> str:
     threshold = _find_assignment(code_text, "THRESHOLD")
     if threshold is not None:
         notes.append(f"threshold hardcoded at {threshold} in classifier.py")
+
+    # A class with (near-)zero recall means the classifier has collapsed onto
+    # the other classes — the aggregate accuracy then mostly reflects the label
+    # mix, not real signal. Say so explicitly; it changes how a retune should go.
+    collapsed = [name for name, score in class_accuracy.items()
+                 if score < CLASS_COLLAPSE_FLOOR]
+    if collapsed:
+        notes.append(
+            f"class collapse: {', '.join(collapsed)} recall near zero — "
+            "aggregate accuracy mostly reflects the majority class share, not signal"
+        )
 
     weakest_labels = _weakest_labels(class_accuracy)
     if "neutral" in weakest_labels:
@@ -343,6 +360,7 @@ def _build_llm_prompt(
 ) -> str:
     """Prompt the LLM for judgement text only; control fields are deterministic."""
     payload = {
+        "eval_split": metrics.get("eval_split", "test"),
         "metrics": _prompt_metrics(metrics),
         "classifier_summary": _classifier_summary_for_prompt(code_text),
         "misclassified_sample": failure_sample,
@@ -359,6 +377,13 @@ def _build_llm_prompt(
         "Ground your reason in accuracy, target, weakest labels, and any useful "
         "classifier observation. Use the misclassified sample to describe the "
         "failure pattern when possible. Do not include markdown or extra keys.\n\n"
+        "Judge per-class accuracy, not just the aggregate: a classifier that "
+        "predicts one class for almost everything can score near that class's "
+        "share of the data while learning nothing — call that out in code_notes "
+        "if you see it. The eval_split field says which held-out split these "
+        "metrics come from; retunes are scored on val so the test split stays "
+        "unseen until the final report. Prefer observations that improve "
+        "balance across classes over ones that chase the aggregate number.\n\n"
         f"INPUT:\n{json.dumps(payload, indent=2)}"
     )
 
@@ -430,18 +455,41 @@ def apply_llm_review(
     return validate_proposal(proposal, metrics)
 
 
+def _select_split(rows: list[dict], eval_split: str) -> list[dict]:
+    """Return only the rows belonging to `eval_split` ("val" or "test").
+
+    The retune loop scores itself on the val rows so the test rows stay unseen
+    until the final report — repeatedly tuning against the test set would
+    overfit it and inflate the final accuracy. Missing rows are a hard error:
+    silently scoring the wrong split would defeat the whole point.
+    """
+    if eval_split not in ("val", "test"):
+        raise ValueError(f"eval_split must be 'val' or 'test', got {eval_split!r}")
+    selected = [row for row in rows if row.get("split") == eval_split]
+    if not selected:
+        raise ValueError(
+            f"no split={eval_split} rows in predictions — regenerate "
+            "processed_data.csv with the Processing agent (train/val/test split)"
+        )
+    return selected
+
+
 def build_report(
     rows: list[dict],
     code_text: str,
     llm_fn: Callable[[str], str] | None = None,
+    eval_split: str = "test",
 ) -> dict:
-    """Build the complete Handoff 3 `evaluation_report.json` object.
+    """Build the complete Handoff 3 `evaluation_report.json` object, scored on
+    the `eval_split` rows only ("val" during retune cycles, "test" for the
+    final report).
 
     Metrics, action, focus labels, and suggested params are deterministic.
     The optional LLM can only improve `reason` and `code_notes`.
     """
+    rows = _select_split(rows, eval_split)
     validate_predictions(rows)
-    metrics = compute_metrics(rows)
+    metrics = {**compute_metrics(rows), "eval_split": eval_split}
     code_notes = review_classifier_code(code_text, metrics["class_accuracy"])
     base_proposal = validate_proposal(
         make_base_proposal(metrics, code_text, code_notes),
@@ -475,7 +523,8 @@ def load_inputs(state: EvaluatorState) -> dict:
 
 def evaluate(state: EvaluatorState) -> dict:
     """LangGraph node — compute metrics and build the evaluator report."""
-    return {"report": build_report(state["predictions"], state["code_text"])}
+    return {"report": build_report(state["predictions"], state["code_text"],
+                                   eval_split=state["eval_split"])}
 
 
 def write_report(state: EvaluatorState) -> dict:
@@ -513,12 +562,16 @@ class EvaluatorAgent(Agent):
     def build_graph(self, checkpointer):
         return build_graph(checkpointer)
 
-    def run(self, predictions: str, classifier_code: str) -> dict:
+    def run(self, predictions: str, classifier_code: str, eval_split: str = "test") -> dict:
+        """`eval_split` picks which held-out rows to score: "val" during retune
+        cycles (so the loop can't overfit the test set), "test" for the final
+        report only."""
         output_path = os.path.join(self._output_dir, "evaluation_report.json")
         return self._invoke({
             "predictions_path": predictions,
             "classifier_code_path": classifier_code,
             "output_path": output_path,
+            "eval_split": eval_split,
         })
 
 

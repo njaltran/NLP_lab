@@ -72,10 +72,11 @@ def _assign_label(pct_change, threshold):
 
 
 def _assign_split(df, dataset_end=None):
-    """Add a time-based train/test `split` column: earliest 80% of dates =
-    `train`, the rest = `test`. Date-based (not random) so no future information
-    can leak into training — the classifier trains on `train` rows and is scored
-    only on `test` rows it has never seen.
+    """Add a time-based train/val/test `split` column: earliest 80% of dates =
+    training period, the rest = `test`. The LAST 10% of training dates become
+    `val` — the retune loop scores itself on those rows, keeping `test`
+    untouched until the final report (tuning on test would overfit it).
+    Date-based (not random) so no future information can leak into training.
 
     `dataset_end` (YYYY-MM-DD) optionally drops later rows *before* splitting —
     e.g. "2019-12-31" keeps the COVID crash out of the test window so the
@@ -85,12 +86,16 @@ def _assign_split(df, dataset_end=None):
         before = len(df)
         df = df[pd.to_datetime(df["date"]) <= pd.to_datetime(dataset_end)].reset_index(drop=True)
         print(f"  Dataset ended at {dataset_end}: dropped {before - len(df):,} later rows")
-    split_cut = pd.to_datetime(df["date"]).quantile(0.8)
-    df["split"] = ["train" if d <= split_cut else "test"
-                   for d in pd.to_datetime(df["date"])]
+    dates = pd.to_datetime(df["date"])
+    split_cut = dates.quantile(0.8)
+    val_cut = dates[dates <= split_cut].quantile(0.9)  # last 10% of training dates
+    df["split"] = ["test" if d > split_cut else ("val" if d > val_cut else "train")
+                   for d in dates]
     n_train = int((df["split"] == "train").sum())
+    n_val = int((df["split"] == "val").sum())
     n_test = int((df["split"] == "test").sum())
-    print(f"  Split at {split_cut.date()}: {n_train:,} train / {n_test:,} test")
+    print(f"  Split at {split_cut.date()} (val from {val_cut.date()}): "
+          f"{n_train:,} train / {n_val:,} val / {n_test:,} test")
     return df
 
 

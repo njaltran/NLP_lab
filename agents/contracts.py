@@ -52,7 +52,7 @@ def read_prediction_rows(path: str | os.PathLike[str]) -> list[dict]:
             f"{reader.fieldnames}"
         )
     if not rows:
-        raise ValueError("predictions_test.csv must contain at least one test row")
+        raise ValueError("predictions_test.csv must contain at least one held-out row")
     return rows
 
 
@@ -62,8 +62,8 @@ def validate_prediction_rows(rows: Iterable[dict]) -> None:
         article_id = row.get("article_id", "")
         label = row.get("label", "")
         predicted = row.get("predicted_label", "")
-        if row.get("split") != "test":
-            raise ValueError(f"{article_id}: split must be test")
+        if row.get("split") not in ("val", "test"):
+            raise ValueError(f"{article_id}: split must be val or test")
         if label not in LABELS:
             raise ValueError(f"{article_id}: invalid label {label!r}")
         if predicted not in LABELS:
@@ -81,8 +81,19 @@ def validate_prediction_rows(rows: Iterable[dict]) -> None:
             raise ValueError(f"{article_id}: confidence must equal max prob_*")
 
 
+def _test_rows(predictions):
+    """Return only test rows from a predictions DataFrame."""
+    if "split" not in predictions.columns:
+        raise ValueError("predictions file has no split column (Handoff 2)")
+    test = predictions[predictions["split"] == "test"]
+    if test.empty:
+        raise ValueError("predictions file has no split=test rows")
+    return test
+
+
 def build_explanation_sample(predictions, sample_size: int = 300):
     """Return Jack's Handoff 4 sample DataFrame from Nadi predictions."""
+    predictions = _test_rows(predictions)
     sample = (predictions[[
         "article_id", "article_title", "predicted_label", "label",
         "confidence", "prob_up", "prob_down", "prob_neutral",
@@ -111,6 +122,7 @@ def write_explanation_sample(
 
 def build_final_results(predictions, explanations):
     """Return Handoff 6 final_results rows from predictions and explanations."""
+    predictions = _test_rows(predictions)
     expl = explanations[["article_id", "explanation", "manual_score"]]
     final = predictions.merge(expl, on="article_id", how="left")[FINAL_RESULTS_COLUMNS]
     final["explanation"] = final["explanation"].fillna("")
