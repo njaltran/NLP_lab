@@ -21,7 +21,6 @@ Usage (standalone test):
 See docs/data_contracts.md, Handoff 3.
 """
 
-import csv
 import json
 import os
 import re
@@ -31,12 +30,23 @@ from typing import Callable, TypedDict
 
 try:
     from agents.base import Agent
+    from agents.contracts import (
+        LABELS,
+        PREDICTION_COLUMNS,
+        read_prediction_rows,
+        validate_prediction_rows,
+    )
 except ModuleNotFoundError:
     from base import Agent
+    from contracts import (
+        LABELS,
+        PREDICTION_COLUMNS,
+        read_prediction_rows,
+        validate_prediction_rows,
+    )
 
 OUTPUT_DIR = "outputs"
 TARGET_ACCURACY = 0.60
-PROBABILITY_TOLERANCE = 0.02
 DEFAULT_RETUNE_THRESHOLD = 0.50
 THRESHOLD_STEP = 0.05
 THRESHOLD_FLOOR = 0.20
@@ -50,15 +60,9 @@ OLLAMA_MODEL = os.getenv("EVALUATOR_OLLAMA_MODEL", "llama3.1")
 OLLAMA_TIMEOUT_SECONDS = 30
 LLM_TEMPERATURE = 0.2
 MISCLASSIFIED_SAMPLE_SIZE = 25
-LABELS = ("up", "down", "neutral")
 PROPOSAL_FIELDS = {
     "recommended_action", "reason", "focus_labels", "suggested_params", "code_notes",
 }
-PREDICTION_COLUMNS = [
-    "article_id", "date", "ticker", "article_title", "price_t", "price_t1",
-    "pct_change", "label", "predicted_label", "confidence",
-    "prob_up", "prob_down", "prob_neutral", "split",
-]
 
 
 class EvaluatorState(TypedDict, total=False):
@@ -80,17 +84,7 @@ class EvaluatorState(TypedDict, total=False):
 
 def _read_predictions(path: str) -> list[dict]:
     """Read classifier predictions and enforce the exact Handoff 2 columns."""
-    with open(path, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
-    if reader.fieldnames != PREDICTION_COLUMNS:
-        raise ValueError(
-            "predictions_test.csv columns do not match data contract: "
-            f"{reader.fieldnames}"
-        )
-    if not rows:
-        raise ValueError("predictions_test.csv must contain at least one test row")
-    return rows
+    return read_prediction_rows(path)
 
 
 def _read_code(path: str) -> str:
@@ -101,27 +95,7 @@ def _read_code(path: str) -> str:
 
 def validate_predictions(rows: list[dict]) -> None:
     """Check the Handoff 2 fields needed before scoring."""
-    for row in rows:
-        article_id = row.get("article_id", "")
-        label = row.get("label", "")
-        predicted = row.get("predicted_label", "")
-        if row.get("split") not in ("val", "test"):
-            raise ValueError(f"{article_id}: split must be val or test")
-        if label not in LABELS:
-            raise ValueError(f"{article_id}: invalid label {label!r}")
-        if predicted not in LABELS:
-            raise ValueError(f"{article_id}: invalid predicted_label {predicted!r}")
-
-        probs = [float(row[f"prob_{label_name}"]) for label_name in LABELS]
-        confidence = float(row["confidence"])
-        if not 0 <= confidence <= 1:
-            raise ValueError(f"{article_id}: confidence must be between 0 and 1")
-        if any(prob < 0 or prob > 1 for prob in probs):
-            raise ValueError(f"{article_id}: probabilities must be between 0 and 1")
-        if abs(sum(probs) - 1.0) > PROBABILITY_TOLERANCE:
-            raise ValueError(f"{article_id}: prob_* columns must sum to about 1")
-        if abs(confidence - max(probs)) > PROBABILITY_TOLERANCE:
-            raise ValueError(f"{article_id}: confidence must equal max prob_*")
+    validate_prediction_rows(rows)
 
 
 def compute_metrics(rows: list[dict]) -> dict:

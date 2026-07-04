@@ -20,9 +20,11 @@ from typing import TypedDict
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 try:
     from agents.base import Agent
+    from agents.contracts import LABELS, PREDICTION_COLUMNS
     from agents.state import PipelineState
 except ModuleNotFoundError:
     from base import Agent
+    from contracts import LABELS, PREDICTION_COLUMNS
     from state import PipelineState
 
 OUTPUT_DIR = "outputs"
@@ -42,11 +44,7 @@ OLLAMA_MAX_TOKENS = 500        # a classify() function is short; cap it to bound
 
 # The exact columns the generated classifier must produce on the mock input
 # (Handoff 2). Used to validate LLM-written code before we trust it.
-EXPECTED_PREDICTION_COLUMNS = [
-    "article_id", "date", "ticker", "article_title", "price_t", "price_t1",
-    "pct_change", "label", "predicted_label", "confidence",
-    "prob_up", "prob_down", "prob_neutral", "split",
-]
+EXPECTED_PREDICTION_COLUMNS = PREDICTION_COLUMNS
 MOCK_DATA = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                          "mock_data", "processed_data.csv")
 
@@ -256,7 +254,7 @@ def _runs_on_mock(code: str) -> bool:
     if not rows:
         return False
     for row in rows:
-        if row["predicted_label"] not in ("up", "down", "neutral"):
+        if row["predicted_label"] not in LABELS:
             return False
         try:
             float(row["confidence"])

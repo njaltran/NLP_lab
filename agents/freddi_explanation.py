@@ -42,22 +42,18 @@ from typing_extensions import TypedDict
 # sys.path) — same dual-import trick the other agents use.
 try:
     from agents.base import Agent
+    from agents.contracts import (
+        EXPLANATION_OUTPUT_COLUMNS as OUTPUT_COLUMNS,
+        EXPLANATION_PASSTHROUGH_COLUMNS as PASSTHROUGH_COLUMNS,
+        EXPLANATION_SAMPLE_COLUMNS as INPUT_COLUMNS,
+    )
 except ModuleNotFoundError:
     from base import Agent
-
-# Columns read in (Handoff 4) and the exact columns written out (Handoff 5).
-INPUT_COLUMNS = [
-    "article_id", "article_title", "predicted_label", "actual_label",
-    "confidence", "prob_up", "prob_down", "prob_neutral",
-]
-OUTPUT_COLUMNS = [
-    "article_id", "article_title", "predicted_label", "actual_label",
-    "confidence", "explanation", "manual_score",
-]
-# Passed through from the input untouched (Golden rule 1).
-PASSTHROUGH_COLUMNS = [
-    "article_id", "article_title", "predicted_label", "actual_label", "confidence",
-]
+    from contracts import (
+        EXPLANATION_OUTPUT_COLUMNS as OUTPUT_COLUMNS,
+        EXPLANATION_PASSTHROUGH_COLUMNS as PASSTHROUGH_COLUMNS,
+        EXPLANATION_SAMPLE_COLUMNS as INPUT_COLUMNS,
+    )
 
 DEFAULT_INPUT = "mock_data/sample_for_explanation.csv"
 DEFAULT_OUTPUT = "explanations.csv"

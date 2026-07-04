@@ -17,8 +17,10 @@ from typing import Annotated, TypedDict
 # direct script (`uv run agents/jack_manager.py`, where `agents/` is on sys.path).
 try:
     from agents.base import Agent
+    from agents.contracts import build_final_results, write_explanation_sample
 except ModuleNotFoundError:
     from base import Agent
+    from contracts import build_final_results, write_explanation_sample
 
 OUTPUT_DIR = "outputs"
 
@@ -326,18 +328,12 @@ def write_sample(predictions_path: str, sample_size: int = 300) -> int:
     """Write sample_for_explanation.csv (Handoff 4) from a predictions file.
     Shared by the proceed node and the pipeline's best-iteration restore, so the
     sample format has exactly one definition."""
-    import pandas as pd
-
-    preds = _test_rows(pd.read_csv(predictions_path))
-    sample = (preds[["article_id", "article_title", "predicted_label", "label",
-                     "confidence", "prob_up", "prob_down", "prob_neutral"]]
-              .rename(columns={"label": "actual_label"}))
-    n = min(len(sample), sample_size)
-    if n < len(sample):                                   # only subsample when needed
-        sample = sample.sample(n=n, random_state=42)      # representative + reproducible
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    sample.to_csv(os.path.join(OUTPUT_DIR, "sample_for_explanation.csv"), index=False)
-    return n
+    return write_explanation_sample(
+        predictions_path,
+        os.path.join(OUTPUT_DIR, "sample_for_explanation.csv"),
+        sample_size,
+    )
 
 
 def proceed(state: ManagerState) -> dict:
@@ -354,13 +350,9 @@ def finalize(state: ManagerState) -> dict:
     is back from Freddi. Joins predictions to explanations and writes the finals."""
     import pandas as pd
 
-    preds = _test_rows(pd.read_csv(state.get("predictions_path", "mock_data/predictions_test.csv")))
-    expl = pd.read_csv(state["explanations_path"])[["article_id", "explanation", "manual_score"]]
-    final = preds.merge(expl, on="article_id", how="left")[[
-        "article_id", "date", "ticker", "article_title", "price_t", "price_t1",
-        "pct_change", "label", "predicted_label", "confidence", "explanation", "manual_score"]]
-    final["explanation"] = final["explanation"].fillna("")          # null → empty string
-    final["manual_score"] = final["manual_score"].astype("Int64")   # int, NA → empty
+    preds = pd.read_csv(state.get("predictions_path", "mock_data/predictions_test.csv"))
+    expl = pd.read_csv(state["explanations_path"])
+    final = build_final_results(preds, expl)
 
     report = state["evaluation_report"]
     _write_decision(state)
@@ -370,7 +362,7 @@ def finalize(state: ManagerState) -> dict:
         "final_accuracy": report.get("accuracy"),
         "loop_iterations": state["iteration"],
         "class_accuracy": report.get("class_accuracy", {}),
-        "test_set_size": int(len(preds)),
+        "test_set_size": int(len(final)),
         "explanations_generated": int((final["explanation"] != "").sum()),
         "manually_scored": int(final["manual_score"].notna().sum()),
     })
