@@ -288,6 +288,50 @@ def test_misclassified_sample_is_limited_and_excludes_ids():
     assert "article_id" not in sample[0]
 
 
+def test_llm_network_failure_falls_back_to_base_proposal():
+    """A dead Ollama (OSError) must not stop evaluation_report.json."""
+    rows = se._read_predictions(PREDICTIONS)
+    code = se._read_code(CLASSIFIER)
+
+    def dead_ollama(prompt):
+        raise OSError("connection refused")
+
+    report = se.build_report(rows, code, llm_fn=dead_ollama)
+
+    assert report["proposal"]["recommended_action"] == "proceed"
+    assert report["proposal"]["reason"].startswith("accuracy 0.67 clears")
+
+
+def test_llm_review_applies_on_retune_without_touching_params():
+    """On the retune path the LLM updates prose only; params survive the merge."""
+    rows = _load_mock_rows()
+    for row in rows:
+        row["predicted_label"] = "neutral"
+        row["confidence"] = "0.90"
+        row["prob_up"] = "0.05"
+        row["prob_down"] = "0.05"
+        row["prob_neutral"] = "0.90"
+
+    def fake_llm(prompt):
+        return json.dumps({
+            "reason": "accuracy misses the target; up and down carry no signal",
+            "code_notes": "threshold still hardcoded",
+        })
+
+    report = se.build_report(rows, "THRESHOLD = 0.5\nMAX_LENGTH = 128\n", llm_fn=fake_llm)
+
+    assert report["below_threshold"] is True
+    assert report["proposal"]["recommended_action"] == "retune"
+    assert report["proposal"]["suggested_params"] == {
+        "threshold": 0.45,
+        "max_length": 128,
+    }
+    assert (
+        report["proposal"]["reason"]
+        == "accuracy misses the target; up and down carry no signal"
+    )
+
+
 if __name__ == "__main__":
     test_build_report_matches_mock_data_contract()
     test_report_written_to_evaluation_report_json()
@@ -299,4 +343,6 @@ if __name__ == "__main__":
     test_invalid_llm_json_falls_back_to_base_proposal()
     test_prompt_excludes_misclassified_ids_and_full_source()
     test_misclassified_sample_is_limited_and_excludes_ids()
+    test_llm_network_failure_falls_back_to_base_proposal()
+    test_llm_review_applies_on_retune_without_touching_params()
     print("Evaluator tests passed")

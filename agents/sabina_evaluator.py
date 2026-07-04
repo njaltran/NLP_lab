@@ -21,6 +21,7 @@ import csv
 import json
 import os
 import re
+import sys
 import urllib.request
 from typing import Callable, TypedDict
 
@@ -146,6 +147,16 @@ def _find_assignment(code_text: str, name: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+def _warn_unparseable(name: str, value: str, default: float | int) -> None:
+    # A silent default here would make every retune re-propose the same
+    # params, so the stalled loop must be visible in the run output.
+    print(
+        f"[sabina] could not parse {name}={value!r} in classifier.py; "
+        f"assuming {default}",
+        file=sys.stderr,
+    )
+
+
 def _float_assignment(code_text: str, name: str, default: float) -> float:
     """Read a numeric assignment from classifier.py, falling back if missing."""
     value = _find_assignment(code_text, name)
@@ -154,6 +165,7 @@ def _float_assignment(code_text: str, name: str, default: float) -> float:
     try:
         return float(value.strip("\"'"))
     except ValueError:
+        _warn_unparseable(name, value, default)
         return default
 
 
@@ -165,6 +177,7 @@ def _int_assignment(code_text: str, name: str, default: int) -> int:
     try:
         return int(float(value.strip("\"'")))
     except ValueError:
+        _warn_unparseable(name, value, default)
         return default
 
 
