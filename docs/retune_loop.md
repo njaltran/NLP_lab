@@ -45,7 +45,14 @@ flowchart TD
 
 - The first retune accepts Sabina's `suggested_params` as-is; every retune
   after that walks the Manager's `_RETUNE_SCHEDULE` (threshold ↓,
-  max_length ↑, boost_factor ↑), skipping combinations already tried.
+  boost_factor ↑), skipping combinations already tried. (`max_length` was
+  dropped as a knob — no headline exceeds 128 tokens.) If the last iteration
+  regressed more than 0.05 below the best, the Manager instead reverts to the
+  best iteration's params and perturbs one knob.
+- Aggregate accuracy can't clear the target while any class sits below the
+  per-class recall floor (0.05) — an all-neutral collapse no longer "passes".
+- Each `main.py` run starts by clearing the previous run's loop artifacts from
+  `outputs/` (fine-tuned weights and the finetune report are kept).
 - Proceed fires on any of: target accuracy (0.60) cleared, iteration cap (5)
   hit, or convergence — the best of the last 2 iterations gained less than
   0.01 over the best before them.
