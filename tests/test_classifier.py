@@ -141,3 +141,89 @@ def test_classifier_to_evaluator_integration(outdir):
     assert "class_accuracy" in report
     assert "proposal" in report
     assert report["proposal"]["recommended_action"] in ["retune", "proceed"]
+
+
+# --- Fine-tuned model selection (model_dir opt-in) -----------------------------
+
+def test_generate_code_defaults_to_pretrained(outdir):
+    """With no model_dir, the generated code uses MODEL_DIR = None (pretrained)."""
+    from agents.nadi_classifier import generate_code
+
+    code_path = outdir / "classifier.py"
+    res = generate_code({"classifier_code_path": str(code_path)})
+    content = code_path.read_text()
+    assert "MODEL_DIR = None" in content
+    assert res["classifier_metadata"]["model_name"] == "ProsusAI/finbert"
+
+
+def test_generate_code_prefers_finetuned_dir_when_present(outdir):
+    """When model_dir points at a real folder, the code loads that folder."""
+    from agents.nadi_classifier import generate_code
+
+    model_dir = outdir / "finbert_finetuned"
+    model_dir.mkdir()
+    code_path = outdir / "classifier.py"
+    res = generate_code({"classifier_code_path": str(code_path),
+                         "model_dir": str(model_dir)})
+    content = code_path.read_text()
+    assert f"MODEL_DIR = {str(model_dir)!r}" in content
+    assert res["classifier_metadata"]["model_name"] == str(model_dir)
+
+
+def test_generate_code_ignores_missing_model_dir(outdir):
+    """A model_dir that doesn't exist falls back to pretrained (opt-in safety)."""
+    from agents.nadi_classifier import generate_code
+
+    code_path = outdir / "classifier.py"
+    res = generate_code({"classifier_code_path": str(code_path),
+                         "model_dir": str(outdir / "does_not_exist")})
+    assert "MODEL_DIR = None" in code_path.read_text()
+
+
+# --- Guardrailed LLM code generation -------------------------------------------
+
+def test_llm_codegen_falls_back_on_bad_output(outdir):
+    """If the LLM returns unusable code, generate_code keeps the template
+    classifier (default classify function) instead of crashing."""
+    from agents.nadi_classifier import generate_code
+
+    code_path = outdir / "classifier.py"
+    state = {
+        "classifier_code_path": str(code_path),
+        "retune_request": {"iteration": 1, "focus_labels": ["down"]},
+        "llm_fn": lambda prompt: "def classify(title): return (",  # broken
+    }
+    generate_code(state)
+    content = code_path.read_text()
+    # The template's own classify signature survives -> fallback happened.
+    assert "def classify(title: str) -> dict:" in content
+
+
+@pytest.mark.slow
+def test_llm_codegen_used_when_valid(outdir):
+    """A valid LLM classify() that passes the mock run is spliced in. Marked
+    slow because the validation step loads FinBERT."""
+    from agents.nadi_classifier import generate_code
+
+    good = (
+        "def classify(title):\n"
+        "    inputs = tokenizer(title, return_tensors='pt', truncation=True, max_length=MAX_LENGTH)\n"
+        "    with torch.no_grad():\n"
+        "        probs = torch.softmax(model(**inputs).logits, dim=1)[0]\n"
+        "    by_label = {ID2OURS[i]: float(p) for i, p in enumerate(probs)}\n"
+        "    top = max(by_label, key=by_label.get)\n"
+        "    return {'predicted_label': top, 'confidence': by_label[top],\n"
+        "            'prob_up': by_label['up'], 'prob_down': by_label['down'],\n"
+        "            'prob_neutral': by_label['neutral']}\n"
+    )
+    code_path = outdir / "classifier.py"
+    state = {
+        "classifier_code_path": str(code_path),
+        "retune_request": {"iteration": 1, "focus_labels": ["down"]},
+        "llm_fn": lambda prompt: good,
+    }
+    generate_code(state)
+    content = code_path.read_text()
+    # The LLM version (def classify(title):) replaced the template one.
+    assert "def classify(title):" in content
+    assert "def classify(title: str) -> dict:" not in content
