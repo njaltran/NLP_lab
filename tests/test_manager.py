@@ -204,7 +204,7 @@ def test_retune_params_adapt_and_do_not_repeat():
     assert len(seen) == 4
     # no two consecutive retunes used the same params
     assert all(seen[i] != seen[i + 1] for i in range(len(seen) - 1))
-    assert {"threshold", "max_length"} <= set(seen[-1])
+    assert {"threshold", "boost_factor"} <= set(seen[-1])
 
 
 def test_second_retune_skips_schedule_entry_matching_sabinas_proposal():
@@ -222,8 +222,54 @@ def test_second_retune_skips_schedule_entry_matching_sabinas_proposal():
     first = g.invoke({**base, "evaluation_report": report}, cfg)["tried_params"][-1]
     second = g.invoke({**base, "evaluation_report": report}, cfg)["tried_params"][-1]
     assert first == {"threshold": 0.45, "max_length": 128}
-    # second retune must not re-run the same threshold/max_length combination
-    assert (second["threshold"], second["max_length"]) != (0.45, 128)
+    # second retune must not re-run the same threshold Sabina's proposal used
+    assert second["threshold"] != 0.45
+
+
+def test_finalize_pass_does_not_duplicate_accuracy_history(proceed_report):
+    """The finalize invocation re-runs decide on the same report; it must not
+    append the same accuracy a second time (bug seen live: 9 entries, 8 iterations)."""
+    g, cfg = _graph(), {"configurable": {"thread_id": "no-dup"}}
+    g.invoke({**BASE, "evaluation_report": RETUNE_REPORT}, cfg)
+    g.invoke({**BASE, "evaluation_report": proceed_report}, cfg)
+    out = g.invoke({**BASE, "evaluation_report": proceed_report, "explanations_path": EXPL}, cfg)
+    assert len(out["accuracy_history"]) == 2  # retune + proceed; finalize adds nothing
+
+
+def test_class_collapse_blocks_cleared_target():
+    """Aggregate accuracy above target must not clear the gate when a class has
+    collapsed to (near) zero recall — that run shipped up=0.0 while 'passing'."""
+    state = {
+        "evaluation_report": {
+            "accuracy": 0.65,
+            "class_accuracy": {"up": 0.0, "down": 0.10, "neutral": 0.95},
+            "proposal": {"recommended_action": "proceed"},
+        },
+        "target_accuracy": 0.60, "max_iterations": 5,
+    }
+    out = jm.decide(state)
+    assert out["final_action"] == "retune"
+
+
+def test_regression_reverts_to_best_params_and_perturbs():
+    """When the last iteration regresses hard below the best, the next retune
+    must go back toward the best iteration's params (one knob perturbed), not
+    keep escalating down the schedule."""
+    best_params = {"threshold": 0.20, "boost_factor": 1.75}
+    tried = [{"threshold": 0.45, "boost_factor": 1.25}, best_params]
+    history = [0.21, 0.30, 0.39, 0.23]   # best at index 2 (from tried[1]), then crash
+    params = jm._next_params(tried, history)
+    # Perturbation of the best params — one knob moved, the other kept.
+    assert (params.get("boost_factor") == best_params["boost_factor"]
+            and params["threshold"] != best_params["threshold"]) or (
+           params.get("threshold") == best_params["threshold"]
+            and params["boost_factor"] != best_params["boost_factor"])
+
+
+def test_no_regression_keeps_walking_schedule():
+    tried = [{"threshold": 0.45, "boost_factor": 1.25}]
+    history = [0.21, 0.30]               # improving — no revert
+    assert jm._next_params(tried, history) == jm._RETUNE_SCHEDULE[1]
 
 
 def test_accuracy_history_accumulates_one_per_iteration():
