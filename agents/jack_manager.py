@@ -44,6 +44,7 @@ class ManagerState(TypedDict):
     # --- convergence config (set once at start; see `decide`) ---
     patience: int                # how many recent iterations to watch for progress
     min_delta: float             # smallest accuracy gain that counts as "progress"
+    min_class_accuracy: float    # per-class recall floor; below it = collapse, can't clear target
 
     # --- running history (reducer fields → APPENDED every iteration) ------------
     # A reducer field is merged with `operator.add` (list concatenation) instead of
@@ -87,32 +88,65 @@ def _write_decision(state: "ManagerState") -> None:
 # Sabina's proposed params as-is; every retune AFTER that walks down this list
 # (skipping anything already tried) so each attempt is genuinely different rather
 # than a repeat. The levers: lower `threshold` so fewer rows get forced to the
-# `neutral` fallback class, widen `max_length` so longer headlines aren't
-# truncated, and raise `boost_factor` so Nadi's focus-label boost (applied to
-# whatever Sabina flagged as weakest) has more effect each retune. Tune these
-# values here — nothing downstream is hardcoded to them.
+# `neutral` fallback class, and raise `boost_factor` so Nadi's focus-label boost
+# (applied to whatever Sabina flagged as weakest) has more effect each retune.
+# `max_length` was dropped as a knob: no headline in the dataset exceeds 128
+# tokens (max 117, measured 2026-07-04), so raising it never changed anything.
+# Tune these values here — nothing downstream is hardcoded to them.
 _RETUNE_SCHEDULE = [
-    {"threshold": 0.45, "max_length": 128, "boost_factor": 1.25},
-    {"threshold": 0.40, "max_length": 160, "boost_factor": 1.35},
-    {"threshold": 0.35, "max_length": 192, "boost_factor": 1.45},
-    {"threshold": 0.30, "max_length": 224, "boost_factor": 1.55},
-    {"threshold": 0.25, "max_length": 256, "boost_factor": 1.65},
-    {"threshold": 0.20, "max_length": 256, "boost_factor": 1.75},
+    {"threshold": 0.45, "boost_factor": 1.25},
+    {"threshold": 0.40, "boost_factor": 1.35},
+    {"threshold": 0.35, "boost_factor": 1.45},
+    {"threshold": 0.30, "boost_factor": 1.55},
+    {"threshold": 0.25, "boost_factor": 1.65},
+    {"threshold": 0.20, "boost_factor": 1.75},
 ]
 
+# Revert-and-perturb policy: when the last iteration's accuracy falls more than
+# _REGRESSION_DELTA below the best iteration's, the escalation clearly overshot —
+# go back to the params that produced the best iteration and move ONE knob one
+# step, instead of marching further down the schedule (live case: 0.39 → 0.23
+# after the last schedule entry boosted the wrong labels).
+_REGRESSION_DELTA = 0.05
+_THRESHOLD_STEP = 0.05
+_BOOST_STEP = 0.10
 
-def _next_params(tried: list) -> dict:
-    """Pick the next retune params: the first schedule entry not already tried,
-    or the last entry once the schedule is exhausted (the iteration cap still
-    bounds the loop, so returning a repeat here is safe).
 
-    "Already tried" compares only the keys both dicts share: Sabina's proposal
-    omits params she doesn't set (e.g. `boost_factor`), and Nadi fills those from
-    the same defaults the schedule starts at — so a schedule entry that matches a
-    tried set on every shared key would regenerate an identical classifier."""
-    def _same(a: dict, b: dict) -> bool:
-        shared = a.keys() & b.keys()
-        return bool(shared) and all(a[k] == b[k] for k in shared)
+def _same(a: dict, b: dict) -> bool:
+    """Param-set equality on shared keys only: Sabina's proposal omits params she
+    doesn't set (e.g. `boost_factor`), and Nadi fills those from the same defaults
+    the schedule starts at — so a candidate that matches a tried set on every
+    shared key would regenerate an identical classifier."""
+    shared = a.keys() & b.keys()
+    return bool(shared) and all(a[k] == b[k] for k in shared)
+
+
+def _next_params(tried: list, history: list = ()) -> dict:
+    """Pick the next retune params.
+
+    1. Revert-and-perturb: if the latest accuracy regressed more than
+       _REGRESSION_DELTA below the best, perturb the best iteration's params.
+       `history[i]` is iteration i+1's accuracy; iteration 1 ran on defaults and
+       each later iteration k ran on `tried[k-2]`, so the best history index b
+       maps to `tried[b-1]` (or defaults for b == 0).
+    2. Otherwise: first schedule entry not already tried, or the last entry once
+       the schedule is exhausted (the iteration cap still bounds the loop, so
+       returning a repeat here is safe)."""
+    history = list(history)
+    if len(history) >= 2 and tried:
+        best = max(range(len(history)), key=lambda i: history[i])
+        if history[-1] < history[best] - _REGRESSION_DELTA:
+            base = tried[best - 1] if 1 <= best <= len(tried) else {}
+            threshold = base.get("threshold", 0.5)
+            boost = base.get("boost_factor", 1.25)
+            candidates = [
+                {**base, "threshold": round(max(0.05, threshold - _THRESHOLD_STEP), 2)},
+                {**base, "threshold": round(min(0.60, threshold + _THRESHOLD_STEP), 2)},
+                {**base, "boost_factor": round(boost + _BOOST_STEP, 2)},
+            ]
+            for candidate in candidates:
+                if not any(_same(candidate, t) for t in tried):
+                    return candidate
 
     for params in _RETUNE_SCHEDULE:
         if not any(_same(params, t) for t in tried):
@@ -144,18 +178,25 @@ def decide(state: ManagerState) -> dict:
     report = state["evaluation_report"]
     accuracy = report["accuracy"]
     # Count retune cycles only: once we've proceeded, the finalize pass is not a
-    # new iteration, so don't bump the counter past convergence.
-    iteration = state.get("iteration", 0)
-    if state.get("final_action") != "proceed":
-        iteration += 1
+    # new iteration, so don't bump the counter or re-append its accuracy.
+    finalize_pass = state.get("final_action") == "proceed"
+    iteration = state.get("iteration", 0) + (0 if finalize_pass else 1)
 
     # Full accuracy trend INCLUDING this iteration — the input to convergence.
     history = state.get("accuracy_history", []) + [accuracy]
     patience = state.get("patience", 2)
     min_delta = state.get("min_delta", 0.01)
 
+    # A class collapsed to (near-)zero recall means the aggregate accuracy is a
+    # degenerate win (e.g. everything predicted neutral) — don't let it clear
+    # the gate. Cap/convergence can still force proceed; select_best then
+    # restores the best earlier iteration anyway.
+    class_accuracy = report.get("class_accuracy", {})
+    floor = state.get("min_class_accuracy", 0.05)
+    collapsed = bool(class_accuracy) and min(class_accuracy.values()) < floor
+
     # Three independent reasons to stop retuning and move on.
-    cleared = accuracy >= state["target_accuracy"]       # good enough
+    cleared = accuracy >= state["target_accuracy"] and not collapsed
     cap_hit = iteration >= state["max_iterations"]        # out of budget
     converged = _converged(history, patience, min_delta)  # progress has stalled
     final_action = "proceed" if (cleared or cap_hit or converged) else "retune"
@@ -166,6 +207,8 @@ def decide(state: ManagerState) -> dict:
         why = "converged (no improvement), proceeding"
     elif cap_hit:
         why = "cap hit, forcing proceed"
+    elif collapsed and accuracy >= state["target_accuracy"]:
+        why = "accuracy clears target but a class collapsed, retuning"
     else:
         why = "below target, retuning"
     note = (f"iteration {iteration}: accuracy {accuracy:.2f} vs target "
@@ -177,7 +220,9 @@ def decide(state: ManagerState) -> dict:
         "final_action": final_action,
         "notes": note,                   # plain field → overwrites
         "decision_log": [note],          # reducer field → appended
-        "accuracy_history": [accuracy],  # reducer field → appended
+        # reducer field → appended; nothing on the finalize pass, which re-reads
+        # the report the loop already recorded
+        "accuracy_history": [] if finalize_pass else [accuracy],
     }
 
     if final_action == "retune":
@@ -190,7 +235,7 @@ def decide(state: ManagerState) -> dict:
             used = proposal.get("suggested_params", {})
             out["decision"], out["overrides"] = "accept", {}
         else:
-            used = _next_params(tried)
+            used = _next_params(tried, history)
             out["decision"] = "override"
             out["overrides"] = {"suggested_params": used,
                                 "focus_labels": proposal.get("focus_labels", [])}
@@ -231,25 +276,37 @@ def write_retune(state: ManagerState) -> dict:
         "misclassified_ids": report.get("misclassified_ids", []),
         "suggested_params": {**proposal.get("suggested_params", {}),
                              **overrides.get("suggested_params", {})},
+        # Sabina's code observations, passed through unchanged — Nadi's optional
+        # LLM code adaptation prompts with these (falls back to `reason` if empty).
+        "code_notes": proposal.get("code_notes", ""),
     })
     return {"decision_log": [f"iteration {state['iteration']}: wrote retune_request.json"]}
+
+
+def write_sample(predictions_path: str, sample_size: int = 300) -> int:
+    """Write sample_for_explanation.csv (Handoff 4) from a predictions file.
+    Shared by the proceed node and the pipeline's best-iteration restore, so the
+    sample format has exactly one definition."""
+    import pandas as pd
+
+    preds = pd.read_csv(predictions_path)
+    sample = (preds[["article_id", "article_title", "predicted_label", "label",
+                     "confidence", "prob_up", "prob_down", "prob_neutral"]]
+              .rename(columns={"label": "actual_label"}))
+    n = min(len(sample), sample_size)
+    if n < len(sample):                                   # only subsample when needed
+        sample = sample.sample(n=n, random_state=42)      # representative + reproducible
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    sample.to_csv(os.path.join(OUTPUT_DIR, "sample_for_explanation.csv"), index=False)
+    return n
 
 
 def proceed(state: ManagerState) -> dict:
     """sample_for_explanation.csv (Handoff 4) — drawn from predictions_test.csv.
     Terminal: hands off to Freddi and waits for explanations.csv."""
-    import pandas as pd
-
-    preds = pd.read_csv(state.get("predictions_path", "mock_data/predictions_test.csv"))
-    sample = (preds[["article_id", "article_title", "predicted_label", "label",
-                     "confidence", "prob_up", "prob_down", "prob_neutral"]]
-              .rename(columns={"label": "actual_label"}))
-    n = min(len(sample), state.get("sample_size", 300))
-    if n < len(sample):                                   # only subsample when needed
-        sample = sample.sample(n=n, random_state=42)      # representative + reproducible
     _write_decision(state)
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    sample.to_csv(os.path.join(OUTPUT_DIR, "sample_for_explanation.csv"), index=False)
+    n = write_sample(state.get("predictions_path", "mock_data/predictions_test.csv"),
+                     state.get("sample_size", 300))
     return {"decision_log": [f"iteration {state['iteration']}: wrote sample_for_explanation.csv ({n} rows)"]}
 
 
@@ -379,7 +436,7 @@ class ManagerAgent(Agent):
     """
 
     def __init__(self, *, target_accuracy=0.60, max_iterations=5,
-                 patience=2, min_delta=0.01,
+                 patience=2, min_delta=0.01, min_class_accuracy=0.05,
                  predictions_path="mock_data/predictions_test.csv",
                  sample_size=300, checkpointer=None, thread_id="manager"):
         # Set once and merged into every run's state; the iteration counter and
@@ -391,6 +448,7 @@ class ManagerAgent(Agent):
             "max_iterations": max_iterations,
             "patience": patience,
             "min_delta": min_delta,
+            "min_class_accuracy": min_class_accuracy,
             "predictions_path": predictions_path,
             "sample_size": sample_size,
         }

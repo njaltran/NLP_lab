@@ -40,13 +40,17 @@ def main():
     p.add_argument("--sample-size", type=int, default=300, help="rows sampled for explanation")
     p.add_argument("--no-ollama", action="store_true", help="force Freddi's offline fallback")
     p.add_argument("--data-dir", default=None, help="override dir holding fnspid_raw.csv")
+    p.add_argument("--model-dir", default=None,
+                   help="fine-tuned weights folder for Nadi (e.g. outputs/finbert_finetuned); "
+                        "omitted = pretrained FinBERT")
     args = p.parse_args()
 
     load_dotenv()  # make .env secrets (e.g. HF_TOKEN) visible to the agents
     final = run(threshold=args.threshold, target_accuracy=args.target_accuracy,
                 max_iterations=args.max_iterations, patience=args.patience,
                 min_delta=args.min_delta, sample_size=args.sample_size,
-                use_ollama=not args.no_ollama, data_dir=args.data_dir)
+                use_ollama=not args.no_ollama, data_dir=args.data_dir,
+                model_dir=args.model_dir)
     print(f"\n[main] done -- {final['final_action']} at iteration "
           f"{final['iteration']}. Outputs in {OUT}/")
 

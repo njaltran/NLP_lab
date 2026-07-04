@@ -2,7 +2,7 @@
   "iteration": 1,
   "reason": "accuracy 0.54 below target 0.60",
   "current_accuracy": 0.54,
-  "target_accuracy": 0.60,
+  "target_accuracy": 0.6,
   "focus_labels": [
     "neutral",
     "down"
@@ -19,5 +19,6 @@
     "threshold": 0.5,
     "max_length": 128,
     "boost_factor": 1.25
-  }
+  },
+  "code_notes": "threshold hardcoded at 0.5 in classifier.py"
 }
