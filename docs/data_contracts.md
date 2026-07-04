@@ -24,6 +24,7 @@ Built by joining FNSPID headlines to yfinance prices on `ticker` + publication d
 | price_t1 | float | 125.12 | closing price on next trading day (from yfinance) |
 | pct_change | float | 3.38 | percentage change T to T+1 |
 | label | string | up | >+1% = up, <-1% = down, in between = neutral |
+| split | string | train | `train` for the earliest 80% of dates; `test` for the remainder — assigned by date, not randomly, so no future information leaks into training. Aurora drops rows after 2019-12-31 (pre-COVID cutoff). |
 
 ## Handoff 2 — Classifier Agent (Nadi) → Evaluator Agent (Sabina)
 

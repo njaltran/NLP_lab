@@ -43,6 +43,24 @@ skip_inference = pytest.mark.skipif(not _CAN_RUN_INFERENCE, reason=_REASON)
 
 # --- Offline Code Generation Tests ---
 
+def test_generated_classifier_filters_test_rows(outdir):
+    """Generated classifier.py must honour Aurora's split column (offline check)."""
+    code_path = outdir / "classifier.py"
+    state = {"classifier_code_path": str(code_path)}
+    generate_code(state)
+    with open(code_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    # Template must filter on split == "test"
+    assert "split" in content
+    assert '"test"' in content
+    # Must NOT hardcode split on every row — Aurora provides the column
+    assert 'row["split"] = "test"' not in content
+    assert "row['split'] = 'test'" not in content
+    # Must load fine-tuned weights when available
+    assert "FINETUNED_DIR" in content
+    assert "finbert_finetuned" in content
+
+
 def test_classifier_code_generation_default(outdir):
     """Test default code generation (offline)."""
     code_path = outdir / "classifier.py"
