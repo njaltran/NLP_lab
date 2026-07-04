@@ -12,29 +12,43 @@ import os
 from pathlib import Path
 from typing import Iterable
 
+# Used by Nadi (`agents/nadi_classifier.py`) to reject bad generated labels and
+# by Sabina (`agents/sabina_evaluator.py`) to score per-label accuracy.
 LABELS = ("up", "down", "neutral")
+
+# Used by Sabina's prediction validation; probabilities are rounded, so the
+# contract allows a small tolerance instead of requiring exact sums.
 PROBABILITY_TOLERANCE = 0.02
 
+# Handoff 2: Nadi writes these columns in predictions_test.csv; Sabina reads
+# them, and Nadi's LLM-code guardrail checks generated scripts against them.
 PREDICTION_COLUMNS = [
     "article_id", "date", "ticker", "article_title", "price_t", "price_t1",
     "pct_change", "label", "predicted_label", "confidence",
     "prob_up", "prob_down", "prob_neutral", "split",
 ]
 
+# Handoff 4: Jack writes these columns in sample_for_explanation.csv; Freddi
+# reads them before generating explanations.
 EXPLANATION_SAMPLE_COLUMNS = [
     "article_id", "article_title", "predicted_label", "actual_label",
     "confidence", "prob_up", "prob_down", "prob_neutral",
 ]
 
+# Handoff 5: Freddi writes these columns in explanations.csv; Jack reads them
+# when building the final outputs.
 EXPLANATION_OUTPUT_COLUMNS = [
     "article_id", "article_title", "predicted_label", "actual_label",
     "confidence", "explanation", "manual_score",
 ]
 
+# Freddi copies these input columns straight through to explanations.csv.
 EXPLANATION_PASSTHROUGH_COLUMNS = [
     "article_id", "article_title", "predicted_label", "actual_label", "confidence",
 ]
 
+# Handoff 6: Jack writes these columns in final_results.csv for the notebook and
+# any Streamlit app to read.
 FINAL_RESULTS_COLUMNS = [
     "article_id", "date", "ticker", "article_title", "price_t", "price_t1",
     "pct_change", "label", "predicted_label", "confidence", "explanation", "manual_score",
@@ -42,7 +56,7 @@ FINAL_RESULTS_COLUMNS = [
 
 
 def read_prediction_rows(path: str | os.PathLike[str]) -> list[dict]:
-    """Read predictions_test.csv and enforce the Handoff 2 column order."""
+    """Read Nadi's predictions_test.csv for Sabina and enforce column order."""
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
@@ -57,7 +71,7 @@ def read_prediction_rows(path: str | os.PathLike[str]) -> list[dict]:
 
 
 def validate_prediction_rows(rows: Iterable[dict]) -> None:
-    """Validate the Handoff 2 fields needed before scoring or finalizing."""
+    """Validate Nadi prediction rows before Sabina scores them."""
     for row in rows:
         article_id = row.get("article_id", "")
         label = row.get("label", "")
@@ -82,7 +96,7 @@ def validate_prediction_rows(rows: Iterable[dict]) -> None:
 
 
 def _test_rows(predictions):
-    """Return only test rows from a predictions DataFrame."""
+    """Return test rows Jack uses for explanations and final outputs."""
     if "split" not in predictions.columns:
         raise ValueError("predictions file has no split column (Handoff 2)")
     test = predictions[predictions["split"] == "test"]
@@ -92,7 +106,7 @@ def _test_rows(predictions):
 
 
 def build_explanation_sample(predictions, sample_size: int = 300):
-    """Return Jack's Handoff 4 sample DataFrame from Nadi predictions."""
+    """Shape Jack's sample_for_explanation.csv rows from Nadi predictions."""
     predictions = _test_rows(predictions)
     sample = (predictions[[
         "article_id", "article_title", "predicted_label", "label",
@@ -109,7 +123,7 @@ def write_explanation_sample(
     output_path: str | os.PathLike[str],
     sample_size: int = 300,
 ) -> int:
-    """Write sample_for_explanation.csv and return the number of rows written."""
+    """Write Jack's sample_for_explanation.csv for Freddi."""
     import pandas as pd
 
     preds = pd.read_csv(predictions_path)
@@ -121,7 +135,7 @@ def write_explanation_sample(
 
 
 def build_final_results(predictions, explanations):
-    """Return Handoff 6 final_results rows from predictions and explanations."""
+    """Shape Jack's final_results.csv from Nadi predictions and Freddi output."""
     predictions = _test_rows(predictions)
     expl = explanations[["article_id", "explanation", "manual_score"]]
     final = predictions.merge(expl, on="article_id", how="left")[FINAL_RESULTS_COLUMNS]
