@@ -151,6 +151,37 @@ def test_best_iteration_restored_when_accuracy_regresses(tmp_path, monkeypatch):
     assert (tmp_path / "outputs" / "sample_for_explanation.csv").exists()
 
 
+def test_clean_outputs_removes_stale_loop_artifacts(tmp_path, monkeypatch):
+    """A fresh run must not inherit the previous run's loop files: a stale
+    evaluation_report.json can trigger Nadi's LLM rewrite on iteration 0, and a
+    stale best/ snapshot could win select_best. Non-loop artifacts (fine-tuned
+    weights, finetune report) must survive."""
+    monkeypatch.chdir(tmp_path)
+    import agents.pipeline_graph as pg
+
+    out = tmp_path / "outputs"
+    (out / "best").mkdir(parents=True)
+    (out / "classifier_history").mkdir()
+    (out / "finbert_finetuned").mkdir()
+    stale = ["classifier.py", "predictions_test.csv", "evaluation_report.json",
+             "retune_request.json", "sample_for_explanation.csv", "explanations.csv",
+             "decision.json", "final_results.csv", "final_report.json"]
+    for name in stale:
+        (out / name).write_text("stale")
+    (out / "best" / "evaluation_report.json").write_text("stale")
+    (out / "finetune_report.json").write_text("keep")
+    (out / "finbert_finetuned" / "model.safetensors").write_text("keep")
+
+    pg.clean_outputs()
+
+    for name in stale:
+        assert not (out / name).exists(), f"stale {name} survived"
+    assert not (out / "best").exists()
+    assert not (out / "classifier_history").exists()
+    assert (out / "finetune_report.json").exists()
+    assert (out / "finbert_finetuned" / "model.safetensors").exists()
+
+
 @needs_langgraph
 def test_graph_cycles_then_finalizes(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)

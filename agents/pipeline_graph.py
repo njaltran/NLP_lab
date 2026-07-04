@@ -80,6 +80,23 @@ BEST_DIR = os.path.join(OUT, "best")
 RECURSION_LIMIT = 60
 
 
+def clean_outputs() -> None:
+    """Remove the previous run's loop artifacts from OUTPUT_DIR before a fresh
+    run. Stale files actively mislead a new run: an old evaluation_report.json
+    carries code_notes that can trigger Nadi's LLM rewrite on iteration 0, and a
+    stale best/ snapshot could win select_best over the new run's iterations.
+    Non-loop artifacts (fine-tuned weights, finetune_report.json) are kept."""
+    loop_files = [CODE, PREDS, EVAL, SAMPLE, RETUNE, EXPL,
+                  os.path.join(OUT, "decision.json"),
+                  os.path.join(OUT, "final_results.csv"),
+                  os.path.join(OUT, "final_report.json")]
+    for path in loop_files:
+        if os.path.exists(path):
+            os.remove(path)
+    for directory in (BEST_DIR, os.path.join(OUT, "classifier_history")):
+        shutil.rmtree(directory, ignore_errors=True)
+
+
 class PipelineState(TypedDict, total=False):
     """Control state carried around the unified graph. Deliberately small — the
     per-row data lives in the contract CSV/JSON files the agents read and write,
@@ -232,6 +249,7 @@ def run(*, threshold=0.01, target_accuracy=0.60, max_iterations=5, patience=2,
     final graph state. This is the entry point `main.py` calls."""
     from langgraph.checkpoint.memory import MemorySaver
 
+    clean_outputs()  # a fresh run must not inherit the previous run's loop files
     agents = Agents.build(target_accuracy=target_accuracy, max_iterations=max_iterations,
                           patience=patience, min_delta=min_delta, sample_size=sample_size,
                           use_ollama=use_ollama)
