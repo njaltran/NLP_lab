@@ -34,6 +34,22 @@ BASE_MODEL = "ProsusAI/finbert"
 LABELS = ["up", "down", "neutral"]
 LABEL_TO_ID = {"up": 0, "down": 1, "neutral": 2}
 
+def load_dotenv(path=".env"):
+    """Populate os.environ from a local .env (KEY=VALUE lines) if it exists —
+    same helper main.py uses, repeated here because this script runs standalone,
+    outside the pipeline entry point. Real environment variables take precedence."""
+    if not os.path.exists(path):
+        return
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, val = line.partition("=")
+                os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
+
+
+load_dotenv()
+
 # Use the same HF token the classifier uses, if one is set (higher rate limits).
 HF_TOKEN = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
 
