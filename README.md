@@ -40,6 +40,10 @@ The whole thing is one compiled **LangGraph** (`agents/pipeline_graph.py`) whose
 retune loop is a real graph *cycle* (`gate → classify → evaluate → gate`), not a
 Python loop. `main.py` just loads secrets, parses flags, and invokes the graph.
 
+The compiled graph, rendered by LangGraph itself:
+
+![LangGraph pipeline graph](./docs/pipeline_graph.png)
+
 ## Setup & run
 
 Python 3.13, uv-managed. From repo root:
