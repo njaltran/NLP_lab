@@ -1,5 +1,19 @@
 # Manager adaptive retune — confusion-aware hill-climb
 
+> **⚠️ SUPERSEDED (2026-07-05) — not implemented.** PR #38 (`feature/manager-adapt`)
+> independently shipped both goals of this design, more thoroughly:
+> - **Finalize-on-best** → `pipeline_graph.py` snapshots each new-best iteration to
+>   `outputs/best/` (scored by `report_score`, collapse-penalized) and `select_best`
+>   restores it, with a val/test split. Stronger than the manager-level
+>   `best_predictions.csv` snapshot proposed here.
+> - **Hill-climb from best** → `_next_params(tried, history)` does revert-and-perturb
+>   (revert to best iteration's params, step one knob) plus collapse detection
+>   (`_is_collapsed`, `min_class_accuracy` floor).
+>
+> The only additive idea left was confusion-driven *lever ordering* (neutral skew
+> picks which knob to perturb first), judged marginal at ~0.25 accuracy. Rebuild
+> abandoned; this doc is kept as a design record only.
+
 **Date:** 2026-07-04
 **Owner:** Jack (Manager agent)
 **Branch:** `feature/manager-adaptive-retune`

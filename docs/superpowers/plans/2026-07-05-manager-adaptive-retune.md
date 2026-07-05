@@ -1,5 +1,12 @@
 # Manager Adaptive Retune Implementation Plan
 
+> **⚠️ SUPERSEDED (2026-07-05) — not implemented.** PR #38 independently shipped
+> finalize-on-best (`select_best` + `report_score`) and a revert-and-perturb
+> hill-climb (`_next_params(tried, history)`) with collapse detection. This plan's
+> 5 tasks would rebuild existing work; the rebuild was abandoned. See the superseded
+> banner in `docs/superpowers/specs/2026-07-04-manager-adaptive-retune-design.md`.
+> Kept as a design record only.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the Manager's fixed `_RETUNE_SCHEDULE` ladder with a confusion-aware hill-climb over `threshold`/`boost_factor`, and make the loop finalize on the best iteration seen rather than the last.
