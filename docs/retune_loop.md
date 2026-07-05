@@ -18,8 +18,10 @@ finalize (once Freddi's explanations are back).
 - **`model_dir` is an opt-in flag.** `uv run main.py --model-dir
   outputs/finbert_finetuned` hands the fine-tuned weights folder through the
   pipeline to Nadi's node. Omitted (the default) means pretrained FinBERT —
-  the current fine-tune underperforms the all-neutral baseline, so it stays
-  off unless explicitly requested.
+  the current fine-tune beats pretrained on the COVID test window but still
+  trails the random baseline (0.33) and the 0.60 target (see
+  [`finetune_runs.md`](./finetune_runs.md)), so it stays off unless
+  explicitly requested.
 
 ## Flowchart
 
@@ -28,18 +30,27 @@ flowchart TD
     A["Aurora: process<br/>FNSPID + yfinance<br/>writes processed_data.csv, split train/test by date"] --> N
 
     N["Nadi: classify<br/>FinBERT, or fine-tuned weights via model_dir<br/>on retune: template param swap, or Ollama rewrite<br/>from code_notes — validated on mock, else fallback<br/>writes predictions_test.csv"] --> S
-    S["Sabina: evaluate<br/>deterministic metrics, LLM polishes reason + code_notes<br/>writes evaluation_report.json"] --> G
+    S["Sabina: evaluate on the VAL split<br/>deterministic metrics, LLM polishes reason + code_notes<br/>writes evaluation_report.json"] --> G
 
     G{"Jack: gate<br/>accuracy at least 0.60? cap hit? converged?"}
     G -->|retune| R
     R["Jack writes retune_request.json<br/>params from schedule, code_notes passed through"] --> N
 
     G -->|proceed| B
-    B["select_best: if an earlier iteration scored higher,<br/>restore its snapshot from outputs/best/<br/>and redraw the explanation sample"] --> P
-    P["Jack writes sample_for_explanation.csv"] --> F
+    B["select_best: if an earlier iteration scored higher,<br/>restore its snapshot from outputs/best/<br/>and redraw the explanation sample"] --> ET
+    ET["Sabina: evaluate on the TEST split, once<br/>honest held-out number for the finals"] --> P
+    P["Jack writes sample_for_explanation.csv (test rows)"] --> F
     F["Freddi: explain<br/>Ollama justification per row<br/>writes explanations.csv"] --> Z
     Z["Jack: finalize<br/>writes final_results.csv + final_report.json"] --> E([END])
 ```
+
+## Validation/test separation
+
+The loop scores itself on the `val` rows (last 10% of training dates, assigned
+by Aurora); the `test` rows are scored exactly once, after `select_best`, for
+the final report. Before this, eight rounds of threshold tuning were measured
+against the same test set they were later judged on — the final accuracy was
+partly the loop overfitting the test rows.
 
 ## Gate rules (unchanged)
 
@@ -51,12 +62,19 @@ flowchart TD
   best iteration's params and perturbs one knob.
 - Aggregate accuracy can't clear the target while any class sits below the
   per-class recall floor (0.05) — an all-neutral collapse no longer "passes".
-- Each `main.py` run starts by clearing the previous run's loop artifacts from
-  `outputs/` (fine-tuned weights and the finetune report are kept).
+  Sabina also reports `class_support` in `evaluation_report.json`, so Jack can
+  tell a real zero-recall collapse from a split that simply contains no rows
+  for one label. Labels with `support = 0` do not block a cleared target.
+- Each run clears the previous run's loop artifacts from `outputs/` once
+  Aurora's processing succeeds — a run that dies on its inputs leaves the
+  previous deliverables intact (fine-tuned weights and the finetune report
+  are always kept).
 - Proceed fires on any of: target accuracy (0.60) cleared, iteration cap (5)
   hit, or convergence — the best of the last 2 iterations gained less than
   0.01 over the best before them.
-- On proceed, `select_best` restores the highest-accuracy iteration's
-  artifacts (predictions/report/classifier snapshotted to `outputs/best/` on
-  each new best), so a regressed final retune can't ship worse results than an
-  earlier pass — accuracy did regress 0.39 → 0.23 on the 2026-07-04 run.
+- On proceed, `select_best` restores the highest-scoring iteration's artifacts
+  (predictions/report/classifier snapshotted to `outputs/best/` on each new
+  best; score = accuracy, penalized below any healthy score when a class
+  collapsed — the same rule as the gate's floor), so a regressed final retune
+  can't ship worse results than an earlier pass — accuracy did regress
+  0.39 → 0.23 on the 2026-07-04 run.

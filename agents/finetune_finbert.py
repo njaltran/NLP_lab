@@ -34,19 +34,13 @@ BASE_MODEL = "ProsusAI/finbert"
 LABELS = ["up", "down", "neutral"]
 LABEL_TO_ID = {"up": 0, "down": 1, "neutral": 2}
 
-def load_dotenv(path=".env"):
-    """Populate os.environ from a local .env (KEY=VALUE lines) if it exists —
-    same helper main.py uses, repeated here because this script runs standalone,
-    outside the pipeline entry point. Real environment variables take precedence."""
-    if not os.path.exists(path):
-        return
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, _, val = line.partition("=")
-                os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
-
+# Same .env loader main.py uses — imported here too because this script runs
+# standalone, outside the pipeline entry point. Dual import: works as a package
+# member and as a bare script (`uv run agents/finetune_finbert.py`).
+try:
+    from agents.env import load_dotenv
+except ModuleNotFoundError:
+    from env import load_dotenv
 
 load_dotenv()
 
@@ -93,19 +87,26 @@ def pick_device():
 def split_frames(df):
     """Split the data into train / validation / test DataFrames.
 
-    train/test come straight from Aurora's `split` column. We carve the
-    validation set out of the LAST 10% of training DATES (not random rows) so
-    validation looks like the real future test set and nothing leaks."""
+    All three come straight from Aurora's `split` column — she owns the one
+    date-based boundary (val = last 10% of training dates), so this script and
+    the retune loop validate on the same rows. Older files without `val` rows
+    get the same carve computed here as a fallback."""
     if "split" not in df.columns:
         raise SystemExit(
             "processed_data.csv has no 'split' column. Regenerate it with the "
             "Processing agent first: uv run agents/aurora_processing.py"
         )
 
-    train_all = df[df["split"] == "train"]
     test = df[df["split"] == "test"]
 
-    # The date that sits at the 90% mark of the training dates.
+    if (df["split"] == "val").any():
+        train = df[df["split"] == "train"]
+        val = df[df["split"] == "val"]
+        return train, val, test
+
+    # Fallback for pre-val files: carve the LAST 10% of training DATES (not
+    # random rows) so validation looks like the real future test set.
+    train_all = df[df["split"] == "train"]
     val_cutoff = pd.to_datetime(train_all["date"]).quantile(0.9)
     is_val = pd.to_datetime(train_all["date"]) > val_cutoff
 

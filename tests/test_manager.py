@@ -67,7 +67,9 @@ def test_full_lifecycle(outdir, proceed_report):
     assert r3["iteration"] == 2          # finalize is NOT a new loop iteration
     assert (outdir / "final_results.csv").exists()
     assert (outdir / "final_report.json").exists()
-    assert len(r3["decision_log"]) == 6  # reducer accumulated: 2 entries × 3 invocations
+    # reducer accumulated: 2 entries per loop invocation + 1 from finalize,
+    # which routes straight to its node (no decide pass).
+    assert len(r3["decision_log"]) == 5
 
 
 # --- gate: accept vs override --------------------------------------------
@@ -116,7 +118,7 @@ def test_outputs_match_contract(outdir, proceed_report):
 
     rep = json.loads((outdir / "final_report.json").read_text())
     assert set(rep) == {
-        "final_accuracy", "loop_iterations", "class_accuracy",
+        "final_accuracy", "loop_iterations", "class_accuracy", "class_support",
         "test_set_size", "explanations_generated", "manually_scored"}
     assert rep["test_set_size"] == len(fin)
     assert rep["explanations_generated"] == int((fin.explanation.fillna("") != "").sum())
@@ -227,8 +229,9 @@ def test_second_retune_skips_schedule_entry_matching_sabinas_proposal():
 
 
 def test_finalize_pass_does_not_duplicate_accuracy_history(proceed_report):
-    """The finalize invocation re-runs decide on the same report; it must not
-    append the same accuracy a second time (bug seen live: 9 entries, 8 iterations)."""
+    """The finalize invocation must not re-append the accuracy the loop already
+    recorded (bug seen live: 9 entries, 8 iterations) — it routes straight to
+    the finalize node, bypassing decide."""
     g, cfg = _graph(), {"configurable": {"thread_id": "no-dup"}}
     g.invoke({**BASE, "evaluation_report": RETUNE_REPORT}, cfg)
     g.invoke({**BASE, "evaluation_report": proceed_report}, cfg)
@@ -236,19 +239,60 @@ def test_finalize_pass_does_not_duplicate_accuracy_history(proceed_report):
     assert len(out["accuracy_history"]) == 2  # retune + proceed; finalize adds nothing
 
 
+# Above-target accuracy with a collapsed class: Sabina recommends proceed (so no
+# suggested_params), but the gate's floor must force a retune.
+COLLAPSED_STATE = {
+    "evaluation_report": {
+        "accuracy": 0.65,
+        "class_accuracy": {"up": 0.0, "down": 0.10, "neutral": 0.95},
+        "proposal": {"recommended_action": "proceed"},
+    },
+    "target_accuracy": 0.60, "max_iterations": 5,
+}
+
+
 def test_class_collapse_blocks_cleared_target():
     """Aggregate accuracy above target must not clear the gate when a class has
     collapsed to (near) zero recall — that run shipped up=0.0 while 'passing'."""
+    out = jm.decide(COLLAPSED_STATE)
+    assert out["final_action"] == "retune"
+
+
+def test_zero_support_class_does_not_block_cleared_target():
+    """A label absent from the eval split is not a model collapse."""
     state = {
         "evaluation_report": {
-            "accuracy": 0.65,
-            "class_accuracy": {"up": 0.0, "down": 0.10, "neutral": 0.95},
+            "accuracy": 0.75,
+            "class_accuracy": {"up": 0.75, "down": 0.0, "neutral": 0.80},
+            "class_support": {"up": 20, "down": 0, "neutral": 20},
             "proposal": {"recommended_action": "proceed"},
         },
-        "target_accuracy": 0.60, "max_iterations": 5,
+        "target_accuracy": 0.60,
+        "max_iterations": 5,
     }
+
     out = jm.decide(state)
-    assert out["final_action"] == "retune"
+
+    assert out["final_action"] == "proceed"
+
+
+def test_report_score_ranks_collapsed_below_healthy():
+    """The best-iteration snapshot must rank on the same rule as the gate: a
+    collapsed high-accuracy pass never beats a healthy lower-accuracy one."""
+    healthy = {"accuracy": 0.39, "class_accuracy": {"up": 0.3, "down": 0.2, "neutral": 0.5}}
+    collapsed = {"accuracy": 0.65, "class_accuracy": {"up": 0.0, "down": 0.0, "neutral": 1.0}}
+    assert jm.report_score(healthy) > jm.report_score(collapsed)
+    assert jm.report_score(healthy) == 0.39   # healthy score IS the accuracy
+
+
+def test_report_score_ignores_zero_support_classes():
+    report = {
+        "accuracy": 0.65,
+        "class_accuracy": {"up": 0.65, "down": 0.0, "neutral": 0.70},
+        "class_support": {"up": 10, "down": 0, "neutral": 10},
+    }
+
+    assert jm.report_score(report) == 0.65
 
 
 def test_regression_reverts_to_best_params_and_perturbs():
@@ -270,6 +314,36 @@ def test_no_regression_keeps_walking_schedule():
     tried = [{"threshold": 0.45, "boost_factor": 1.25}]
     history = [0.21, 0.30]               # improving — no revert
     assert jm._next_params(tried, history) == jm._RETUNE_SCHEDULE[1]
+
+
+def test_collapse_forced_first_retune_takes_schedule_not_empty_params():
+    """When the collapse floor forces a retune on a pass Sabina recommended to
+    proceed, her proposal carries no suggested_params — the gate must fall back
+    to the schedule instead of 'accepting' {} and re-running Nadi's defaults."""
+    out = jm.decide(COLLAPSED_STATE)
+    assert out["decision"] == "override"
+    assert out["tried_params"][-1] == jm._RETUNE_SCHEDULE[0]  # not {}
+
+
+def test_perturb_candidates_carry_full_params():
+    """A perturbation of iteration 1 (Nadi's defaults, no tried entry) must still
+    emit both knobs — a single-key dict makes _same() falsely match schedule
+    entries that share only that key."""
+    tried = [{"threshold": 0.45, "boost_factor": 1.25}]
+    history = [0.39, 0.20]               # best was iteration 1 (defaults), then crash
+    params = jm._next_params(tried, history)
+    assert {"threshold", "boost_factor"} <= set(params)
+
+
+def test_perturb_boost_is_clamped():
+    base = {"threshold": 0.20, "boost_factor": 1.95}
+    # Both threshold perturbations of the best entry already tried — the boost
+    # candidate is next and must not exceed _BOOST_MAX.
+    tried = [base, {"threshold": 0.15, "boost_factor": 1.95},
+             {"threshold": 0.25, "boost_factor": 1.95}]
+    history = [0.10, 0.39, 0.20, 0.20]   # best at index 1 (from tried[0])
+    params = jm._next_params(tried, history)
+    assert params["boost_factor"] == jm._BOOST_MAX
 
 
 def test_accuracy_history_accumulates_one_per_iteration():

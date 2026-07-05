@@ -1,0 +1,63 @@
+{
+  "base_model": "ProsusAI/finbert",
+  "model_dir": "outputs/finbert_finetuned",
+  "test_accuracy": 0.2706,
+  "test_class_accuracy": {
+    "up": 0.2759,
+    "down": 0.0482,
+    "neutral": 0.687
+  },
+  "best_val_accuracy": 0.457,
+  "epochs": [
+    {
+      "epoch": 1,
+      "train_loss": 1.1271,
+      "val_accuracy": 0.457
+    },
+    {
+      "epoch": 2,
+      "train_loss": 1.0772,
+      "val_accuracy": 0.3282
+    },
+    {
+      "epoch": 3,
+      "train_loss": 1.0411,
+      "val_accuracy": 0.4081
+    },
+    {
+      "epoch": 4,
+      "train_loss": 0.9627,
+      "val_accuracy": 0.3797
+    },
+    {
+      "epoch": 5,
+      "train_loss": 0.8461,
+      "val_accuracy": 0.3591
+    },
+    {
+      "epoch": 6,
+      "train_loss": 0.7136,
+      "val_accuracy": 0.3634
+    }
+  ],
+  "rows": {
+    "train": 10595,
+    "val": 1164,
+    "test": 2930
+  },
+  "train_date_range": [
+    "2012-01-16",
+    "2019-12-02"
+  ],
+  "test_date_range": [
+    "2020-02-08",
+    "2020-06-11"
+  ],
+  "params": {
+    "epochs": 6,
+    "batch_size": 16,
+    "lr": 1e-05,
+    "max_length": 128,
+    "seed": 42
+  }
+}

@@ -6,6 +6,11 @@
     "down": 0.75,
     "neutral": 0.33
   },
+  "class_support": {
+    "up": 5,
+    "down": 4,
+    "neutral": 3
+  },
   "test_set_size": 12,
   "explanations_generated": 6,
   "manually_scored": 3

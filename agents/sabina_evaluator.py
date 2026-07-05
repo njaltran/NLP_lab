@@ -6,6 +6,10 @@ Reads the Classifier Agent's `predictions_test.csv` and generated
 to review the classifier code and metrics, and writes the Manager Agent's input:
 `evaluation_report.json`.
 
+Scoring is split-aware: retune cycles are scored on the `val` rows so the loop
+cannot overfit the `test` rows, which are scored exactly once for the final
+report (`eval_split` parameter, recorded in the report).
+
 Exports
 -------
 EvaluatorAgent   Agent subclass — callers do EvaluatorAgent().run()
@@ -17,7 +21,6 @@ Usage (standalone test):
 See docs/data_contracts.md, Handoff 3.
 """
 
-import csv
 import json
 import os
 import re
@@ -27,17 +30,29 @@ from typing import Callable, TypedDict
 
 try:
     from agents.base import Agent
+    from agents.contracts import (
+        LABELS,
+        PREDICTION_COLUMNS,
+        read_prediction_rows,
+        validate_prediction_rows,
+    )
 except ModuleNotFoundError:
     from base import Agent
+    from contracts import (
+        LABELS,
+        PREDICTION_COLUMNS,
+        read_prediction_rows,
+        validate_prediction_rows,
+    )
 
 OUTPUT_DIR = "outputs"
 TARGET_ACCURACY = 0.60
-PROBABILITY_TOLERANCE = 0.02
 DEFAULT_RETUNE_THRESHOLD = 0.50
 THRESHOLD_STEP = 0.05
 THRESHOLD_FLOOR = 0.20
 DEFAULT_MAX_LENGTH = 128
 FOCUS_MARGIN = 0.05
+CLASS_COLLAPSE_FLOOR = 0.05   # per-class recall below this = collapse, flagged in code_notes
 # Read once at import time so tests and demos get stable evaluator behavior.
 USE_OLLAMA = os.getenv("EVALUATOR_USE_OLLAMA", "false").lower() == "true"
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
@@ -45,15 +60,9 @@ OLLAMA_MODEL = os.getenv("EVALUATOR_OLLAMA_MODEL", "llama3.1")
 OLLAMA_TIMEOUT_SECONDS = 30
 LLM_TEMPERATURE = 0.2
 MISCLASSIFIED_SAMPLE_SIZE = 25
-LABELS = ("up", "down", "neutral")
 PROPOSAL_FIELDS = {
     "recommended_action", "reason", "focus_labels", "suggested_params", "code_notes",
 }
-PREDICTION_COLUMNS = [
-    "article_id", "date", "ticker", "article_title", "price_t", "price_t1",
-    "pct_change", "label", "predicted_label", "confidence",
-    "prob_up", "prob_down", "prob_neutral", "split",
-]
 
 
 class EvaluatorState(TypedDict, total=False):
@@ -66,6 +75,7 @@ class EvaluatorState(TypedDict, total=False):
     predictions_path: str
     classifier_code_path: str
     output_path: str
+    eval_split: str
     predictions: list[dict]
     code_text: str
     code_notes: str
@@ -74,17 +84,7 @@ class EvaluatorState(TypedDict, total=False):
 
 def _read_predictions(path: str) -> list[dict]:
     """Read classifier predictions and enforce the exact Handoff 2 columns."""
-    with open(path, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
-    if reader.fieldnames != PREDICTION_COLUMNS:
-        raise ValueError(
-            "predictions_test.csv columns do not match data contract: "
-            f"{reader.fieldnames}"
-        )
-    if not rows:
-        raise ValueError("predictions_test.csv must contain at least one test row")
-    return rows
+    return read_prediction_rows(path)
 
 
 def _read_code(path: str) -> str:
@@ -95,38 +95,20 @@ def _read_code(path: str) -> str:
 
 def validate_predictions(rows: list[dict]) -> None:
     """Check the Handoff 2 fields needed before scoring."""
-    for row in rows:
-        article_id = row.get("article_id", "")
-        label = row.get("label", "")
-        predicted = row.get("predicted_label", "")
-        if row.get("split") != "test":
-            raise ValueError(f"{article_id}: split must be test")
-        if label not in LABELS:
-            raise ValueError(f"{article_id}: invalid label {label!r}")
-        if predicted not in LABELS:
-            raise ValueError(f"{article_id}: invalid predicted_label {predicted!r}")
-
-        probs = [float(row[f"prob_{label_name}"]) for label_name in LABELS]
-        confidence = float(row["confidence"])
-        if not 0 <= confidence <= 1:
-            raise ValueError(f"{article_id}: confidence must be between 0 and 1")
-        if any(prob < 0 or prob > 1 for prob in probs):
-            raise ValueError(f"{article_id}: probabilities must be between 0 and 1")
-        if abs(sum(probs) - 1.0) > PROBABILITY_TOLERANCE:
-            raise ValueError(f"{article_id}: prob_* columns must sum to about 1")
-        if abs(confidence - max(probs)) > PROBABILITY_TOLERANCE:
-            raise ValueError(f"{article_id}: confidence must equal max prob_*")
+    validate_prediction_rows(rows)
 
 
 def compute_metrics(rows: list[dict]) -> dict:
-    """Compute overall and per-class classification accuracy."""
+    """Compute overall and per-class classification accuracy/support."""
     total = len(rows)
     wrong = [row for row in rows if row["label"] != row["predicted_label"]]
     class_accuracy = {}
+    class_support = {}
 
     for label_name in LABELS:
         class_rows = [row for row in rows if row["label"] == label_name]
         correct = sum(row["predicted_label"] == label_name for row in class_rows)
+        class_support[label_name] = len(class_rows)
         class_accuracy[label_name] = (
             round(correct / len(class_rows), 2) if class_rows else 0.0
         )
@@ -136,6 +118,7 @@ def compute_metrics(rows: list[dict]) -> dict:
         "accuracy": accuracy,
         "below_threshold": accuracy < TARGET_ACCURACY,
         "class_accuracy": class_accuracy,
+        "class_support": class_support,
         "misclassified_count": len(wrong),
         "misclassified_ids": [row["article_id"] for row in wrong],
     }
@@ -181,24 +164,69 @@ def _int_assignment(code_text: str, name: str, default: int) -> int:
         return default
 
 
-def _weakest_labels(class_accuracy: dict) -> list[str]:
-    """Return labels within FOCUS_MARGIN of the weakest class accuracy."""
-    weakest_score = min(class_accuracy.values())
+def _weakest_labels(class_accuracy: dict, class_support: dict | None = None) -> list[str]:
+    """Return labels within FOCUS_MARGIN of the weakest supported accuracy."""
+    supported = {
+        label_name: score
+        for label_name, score in class_accuracy.items()
+        if class_support is None or class_support.get(label_name, 0) > 0
+    }
+    if not supported:
+        supported = class_accuracy
+    weakest_score = min(supported.values())
     return [
         label_name
-        for label_name, score in class_accuracy.items()
+        for label_name, score in supported.items()
         if score <= weakest_score + FOCUS_MARGIN
     ]
 
 
 def review_classifier_code(code_text: str, class_accuracy: dict) -> str:
     """Return concise static observations from the generated classifier.py."""
+    return review_classifier_metrics(code_text, class_accuracy)
+
+
+def review_classifier_metrics(
+    code_text: str,
+    class_accuracy: dict,
+    class_support: dict | None = None,
+) -> str:
+    """Return concise static observations from metrics and classifier.py.
+
+    Zero-support labels keep class_accuracy=0.0 for backwards compatibility, but
+    they are not evidence of class collapse. `class_support` disambiguates a
+    missing label from a real near-zero recall.
+    """
     notes = []
     threshold = _find_assignment(code_text, "THRESHOLD")
     if threshold is not None:
         notes.append(f"threshold hardcoded at {threshold} in classifier.py")
 
-    weakest_labels = _weakest_labels(class_accuracy)
+    # A class with (near-)zero recall means the classifier has collapsed onto
+    # the other classes — the aggregate accuracy then mostly reflects the label
+    # mix, not real signal. Say so explicitly; it changes how a retune should go.
+    collapsed = [
+        name for name, score in class_accuracy.items()
+        if (class_support is None or class_support.get(name, 0) > 0)
+        and score < CLASS_COLLAPSE_FLOOR
+    ]
+    if collapsed:
+        notes.append(
+            f"class collapse: {', '.join(collapsed)} recall near zero — "
+            "aggregate accuracy mostly reflects the majority class share, not signal"
+        )
+
+    missing = [
+        name for name in class_accuracy
+        if class_support is not None and class_support.get(name, 0) == 0
+    ]
+    if missing:
+        notes.append(
+            f"no {', '.join(missing)} rows in this eval split — support is zero, "
+            "so this is not evidence of class collapse"
+        )
+
+    weakest_labels = _weakest_labels(class_accuracy, class_support)
     if "neutral" in weakest_labels:
         notes.append("the neutral band (+/-1%) may be too narrow for the neutral class")
 
@@ -220,8 +248,11 @@ def _suggest_retune_params(code_text: str) -> dict:
 
 def make_base_proposal(metrics: dict, code_text: str, code_notes: str) -> dict:
     """Create the contract proposal with deterministic action and params."""
-    weakest_score = min(metrics["class_accuracy"].values())
-    focus_labels = _weakest_labels(metrics["class_accuracy"])
+    focus_labels = _weakest_labels(
+        metrics["class_accuracy"],
+        metrics.get("class_support"),
+    )
+    weakest_score = min(metrics["class_accuracy"][label] for label in focus_labels)
 
     if metrics["below_threshold"]:
         reason = (
@@ -321,6 +352,7 @@ def _prompt_metrics(metrics: dict) -> dict:
         "accuracy": metrics["accuracy"],
         "below_threshold": metrics["below_threshold"],
         "class_accuracy": metrics["class_accuracy"],
+        "class_support": metrics["class_support"],
         "misclassified_count": metrics["misclassified_count"],
     }
 
@@ -369,6 +401,7 @@ def _build_llm_prompt(
 ) -> str:
     """Prompt the LLM for judgement text only; control fields are deterministic."""
     payload = {
+        "eval_split": metrics.get("eval_split", "test"),
         "metrics": _prompt_metrics(metrics),
         "classifier_summary": _classifier_summary_for_prompt(code_text),
         "misclassified_sample": failure_sample,
@@ -385,6 +418,14 @@ def _build_llm_prompt(
         "Ground your reason in accuracy, target, weakest labels, and any useful "
         "classifier observation. Use the misclassified sample to describe the "
         "failure pattern when possible. Do not include markdown or extra keys.\n\n"
+        "Judge per-class accuracy together with class_support, not just the "
+        "aggregate: a classifier that predicts one class for almost everything "
+        "can score near that class's share of the data while learning nothing. "
+        "A class with support 0 is absent from this split, not collapsed. The "
+        "eval_split field says which held-out split these metrics come from; "
+        "retunes are scored on val so the test split stays unseen until the "
+        "final report. Prefer observations that improve balance across classes "
+        "over ones that chase the aggregate number.\n\n"
         f"INPUT:\n{json.dumps(payload, indent=2)}"
     )
 
@@ -456,19 +497,46 @@ def apply_llm_review(
     return validate_proposal(proposal, metrics)
 
 
+def _select_split(rows: list[dict], eval_split: str) -> list[dict]:
+    """Return only the rows belonging to `eval_split` ("val" or "test").
+
+    The retune loop scores itself on the val rows so the test rows stay unseen
+    until the final report — repeatedly tuning against the test set would
+    overfit it and inflate the final accuracy. Missing rows are a hard error:
+    silently scoring the wrong split would defeat the whole point.
+    """
+    if eval_split not in ("val", "test"):
+        raise ValueError(f"eval_split must be 'val' or 'test', got {eval_split!r}")
+    selected = [row for row in rows if row.get("split") == eval_split]
+    if not selected:
+        raise ValueError(
+            f"no split={eval_split} rows in predictions — regenerate "
+            "processed_data.csv with the Processing agent (train/val/test split)"
+        )
+    return selected
+
+
 def build_report(
     rows: list[dict],
     code_text: str,
     llm_fn: Callable[[str], str] | None = None,
+    eval_split: str = "test",
 ) -> dict:
-    """Build the complete Handoff 3 `evaluation_report.json` object.
+    """Build the complete Handoff 3 `evaluation_report.json` object, scored on
+    the `eval_split` rows only ("val" during retune cycles, "test" for the
+    final report).
 
     Metrics, action, focus labels, and suggested params are deterministic.
     The optional LLM can only improve `reason` and `code_notes`.
     """
+    rows = _select_split(rows, eval_split)
     validate_predictions(rows)
-    metrics = compute_metrics(rows)
-    code_notes = review_classifier_code(code_text, metrics["class_accuracy"])
+    metrics = {**compute_metrics(rows), "eval_split": eval_split}
+    code_notes = review_classifier_metrics(
+        code_text,
+        metrics["class_accuracy"],
+        metrics["class_support"],
+    )
     base_proposal = validate_proposal(
         make_base_proposal(metrics, code_text, code_notes),
         metrics,
@@ -501,7 +569,8 @@ def load_inputs(state: EvaluatorState) -> dict:
 
 def evaluate(state: EvaluatorState) -> dict:
     """LangGraph node — compute metrics and build the evaluator report."""
-    return {"report": build_report(state["predictions"], state["code_text"])}
+    return {"report": build_report(state["predictions"], state["code_text"],
+                                   eval_split=state["eval_split"])}
 
 
 def write_report(state: EvaluatorState) -> dict:
@@ -539,12 +608,16 @@ class EvaluatorAgent(Agent):
     def build_graph(self, checkpointer):
         return build_graph(checkpointer)
 
-    def run(self, predictions: str, classifier_code: str) -> dict:
+    def run(self, predictions: str, classifier_code: str, eval_split: str = "test") -> dict:
+        """`eval_split` picks which held-out rows to score: "val" during retune
+        cycles (so the loop can't overfit the test set), "test" for the final
+        report only."""
         output_path = os.path.join(self._output_dir, "evaluation_report.json")
         return self._invoke({
             "predictions_path": predictions,
             "classifier_code_path": classifier_code,
             "output_path": output_path,
+            "eval_split": eval_split,
         })
 
 

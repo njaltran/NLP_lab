@@ -17,8 +17,10 @@ from typing import Annotated, TypedDict
 # direct script (`uv run agents/jack_manager.py`, where `agents/` is on sys.path).
 try:
     from agents.base import Agent
+    from agents.contracts import build_final_results, write_explanation_sample
 except ModuleNotFoundError:
     from base import Agent
+    from contracts import build_final_results, write_explanation_sample
 
 OUTPUT_DIR = "outputs"
 
@@ -110,6 +112,8 @@ _RETUNE_SCHEDULE = [
 _REGRESSION_DELTA = 0.05
 _THRESHOLD_STEP = 0.05
 _BOOST_STEP = 0.10
+_BOOST_MAX = 2.0   # threshold is clamped below; without a ceiling here, repeated
+                   # perturbs would escalate the boost without bound
 
 
 def _same(a: dict, b: dict) -> bool:
@@ -126,23 +130,26 @@ def _next_params(tried: list, history: list = ()) -> dict:
 
     1. Revert-and-perturb: if the latest accuracy regressed more than
        _REGRESSION_DELTA below the best, perturb the best iteration's params.
-       `history[i]` is iteration i+1's accuracy; iteration 1 ran on defaults and
-       each later iteration k ran on `tried[k-2]`, so the best history index b
-       maps to `tried[b-1]` (or defaults for b == 0).
     2. Otherwise: first schedule entry not already tried, or the last entry once
        the schedule is exhausted (the iteration cap still bounds the loop, so
        returning a repeat here is safe)."""
-    history = list(history)
     if len(history) >= 2 and tried:
         best = max(range(len(history)), key=lambda i: history[i])
         if history[-1] < history[best] - _REGRESSION_DELTA:
-            base = tried[best - 1] if 1 <= best <= len(tried) else {}
+            # Params per iteration: iteration 1 ran on Nadi's defaults, each
+            # later one on the next `tried` entry.
+            per_iteration = [{}] + list(tried)
+            base = per_iteration[best] if best < len(per_iteration) else {}
+            # Fill both knobs with Nadi's defaults so every candidate carries
+            # full params: a partial dict (e.g. boost only) would make _same()
+            # falsely match schedule entries that share just that one key.
             threshold = base.get("threshold", 0.5)
             boost = base.get("boost_factor", 1.25)
+            base = {**base, "threshold": threshold, "boost_factor": boost}
             candidates = [
                 {**base, "threshold": round(max(0.05, threshold - _THRESHOLD_STEP), 2)},
                 {**base, "threshold": round(min(0.60, threshold + _THRESHOLD_STEP), 2)},
-                {**base, "boost_factor": round(boost + _BOOST_STEP, 2)},
+                {**base, "boost_factor": round(min(_BOOST_MAX, boost + _BOOST_STEP), 2)},
             ]
             for candidate in candidates:
                 if not any(_same(candidate, t) for t in tried):
@@ -152,6 +159,30 @@ def _next_params(tried: list, history: list = ()) -> dict:
         if not any(_same(params, t) for t in tried):
             return params
     return _RETUNE_SCHEDULE[-1]
+
+
+def _is_collapsed(report: dict, floor: float) -> bool:
+    """True when any class's recall sits below `floor` — the aggregate accuracy
+    is then a degenerate win (e.g. everything predicted neutral).
+
+    Sabina's `class_support` disambiguates a real zero-recall collapse from a
+    split where a label has no rows. Missing support keeps old reports
+    conservative: all class_accuracy entries are treated as supported."""
+    class_accuracy = report.get("class_accuracy", {})
+    class_support = report.get("class_support")
+    supported_scores = [
+        score for label, score in class_accuracy.items()
+        if class_support is None or class_support.get(label, 0) > 0
+    ]
+    return bool(supported_scores) and min(supported_scores) < floor
+
+
+def report_score(report: dict, floor: float = 0.05) -> float:
+    """Rank an iteration for best-snapshot purposes: plain accuracy, pushed below
+    every healthy score when a class collapsed. One definition shared with the
+    pipeline's best-iteration snapshot, mirroring the gate's collapse floor — so
+    `select_best` can never restore a degenerate pass over a healthy one."""
+    return report["accuracy"] - (1.0 if _is_collapsed(report, floor) else 0.0)
 
 
 def _converged(history: list, patience: int, min_delta: float) -> bool:
@@ -177,23 +208,19 @@ def decide(state: ManagerState) -> dict:
     """
     report = state["evaluation_report"]
     accuracy = report["accuracy"]
-    # Count retune cycles only: once we've proceeded, the finalize pass is not a
-    # new iteration, so don't bump the counter or re-append its accuracy.
-    finalize_pass = state.get("final_action") == "proceed"
-    iteration = state.get("iteration", 0) + (0 if finalize_pass else 1)
+    # Retune cycles only — the finalize pass routes straight to `finalize` and
+    # never reaches this node (see `route_entry`).
+    iteration = state.get("iteration", 0) + 1
 
     # Full accuracy trend INCLUDING this iteration — the input to convergence.
     history = state.get("accuracy_history", []) + [accuracy]
     patience = state.get("patience", 2)
     min_delta = state.get("min_delta", 0.01)
 
-    # A class collapsed to (near-)zero recall means the aggregate accuracy is a
-    # degenerate win (e.g. everything predicted neutral) — don't let it clear
-    # the gate. Cap/convergence can still force proceed; select_best then
-    # restores the best earlier iteration anyway.
-    class_accuracy = report.get("class_accuracy", {})
-    floor = state.get("min_class_accuracy", 0.05)
-    collapsed = bool(class_accuracy) and min(class_accuracy.values()) < floor
+    # A collapsed class means the aggregate accuracy is a degenerate win — don't
+    # let it clear the gate. Cap/convergence can still force proceed; select_best
+    # then restores the best (collapse-penalized) earlier iteration anyway.
+    collapsed = _is_collapsed(report, state.get("min_class_accuracy", 0.05))
 
     # Three independent reasons to stop retuning and move on.
     cleared = accuracy >= state["target_accuracy"] and not collapsed
@@ -220,19 +247,20 @@ def decide(state: ManagerState) -> dict:
         "final_action": final_action,
         "notes": note,                   # plain field → overwrites
         "decision_log": [note],          # reducer field → appended
-        # reducer field → appended; nothing on the finalize pass, which re-reads
-        # the report the loop already recorded
-        "accuracy_history": [] if finalize_pass else [accuracy],
+        "accuracy_history": [accuracy],  # reducer field → appended
     }
 
     if final_action == "retune":
         # First retune trusts Sabina's proposal as-is (accept); every retune after
         # that adapts the params (override), because a repeat proposal has already
         # failed once. `tried_params` records what we actually used either way.
+        # A proposal without suggested_params (Sabina recommended proceed but the
+        # collapse floor forced a retune) has nothing to accept — take the
+        # schedule instead of re-running Nadi's defaults.
         proposal = report.get("proposal", {})
         tried = state.get("tried_params", [])
-        if not tried:
-            used = proposal.get("suggested_params", {})
+        if not tried and proposal.get("suggested_params"):
+            used = proposal["suggested_params"]
             out["decision"], out["overrides"] = "accept", {}
         else:
             used = _next_params(tried, history)
@@ -252,12 +280,18 @@ def decide(state: ManagerState) -> dict:
     return out
 
 
+def route_entry(state: ManagerState) -> str:
+    """Entry router: explanations back from Freddi → finalize directly. The gate
+    already proceeded on this report, so re-running decide would re-count the
+    iteration, re-append its accuracy, and burn an LLM rationale on a decision
+    that cannot change."""
+    return "finalize" if state.get("explanations_path") else "decide"
+
+
 def route_after_decide(state: ManagerState) -> str:
-    """Router: retune, or — on proceed — finalize if Freddi's explanations are
-    back, else sample and wait. Reads decisions the nodes already made."""
-    if state["final_action"] == "retune":
-        return "retune"
-    return "finalize" if state.get("explanations_path") else "sample"
+    """Router: retune, or sample for explanation on proceed. Reads the decision
+    the gate already made."""
+    return "retune" if state["final_action"] == "retune" else "sample"
 
 
 def write_retune(state: ManagerState) -> dict:
@@ -287,18 +321,12 @@ def write_sample(predictions_path: str, sample_size: int = 300) -> int:
     """Write sample_for_explanation.csv (Handoff 4) from a predictions file.
     Shared by the proceed node and the pipeline's best-iteration restore, so the
     sample format has exactly one definition."""
-    import pandas as pd
-
-    preds = pd.read_csv(predictions_path)
-    sample = (preds[["article_id", "article_title", "predicted_label", "label",
-                     "confidence", "prob_up", "prob_down", "prob_neutral"]]
-              .rename(columns={"label": "actual_label"}))
-    n = min(len(sample), sample_size)
-    if n < len(sample):                                   # only subsample when needed
-        sample = sample.sample(n=n, random_state=42)      # representative + reproducible
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    sample.to_csv(os.path.join(OUTPUT_DIR, "sample_for_explanation.csv"), index=False)
-    return n
+    return write_explanation_sample(
+        predictions_path,
+        os.path.join(OUTPUT_DIR, "sample_for_explanation.csv"),
+        sample_size,
+    )
 
 
 def proceed(state: ManagerState) -> dict:
@@ -316,12 +344,8 @@ def finalize(state: ManagerState) -> dict:
     import pandas as pd
 
     preds = pd.read_csv(state.get("predictions_path", "mock_data/predictions_test.csv"))
-    expl = pd.read_csv(state["explanations_path"])[["article_id", "explanation", "manual_score"]]
-    final = preds.merge(expl, on="article_id", how="left")[[
-        "article_id", "date", "ticker", "article_title", "price_t", "price_t1",
-        "pct_change", "label", "predicted_label", "confidence", "explanation", "manual_score"]]
-    final["explanation"] = final["explanation"].fillna("")          # null → empty string
-    final["manual_score"] = final["manual_score"].astype("Int64")   # int, NA → empty
+    expl = pd.read_csv(state["explanations_path"])
+    final = build_final_results(preds, expl)
 
     report = state["evaluation_report"]
     _write_decision(state)
@@ -331,7 +355,8 @@ def finalize(state: ManagerState) -> dict:
         "final_accuracy": report.get("accuracy"),
         "loop_iterations": state["iteration"],
         "class_accuracy": report.get("class_accuracy", {}),
-        "test_set_size": int(len(preds)),
+        "class_support": report.get("class_support", {}),
+        "test_set_size": int(len(final)),
         "explanations_generated": int((final["explanation"] != "").sum()),
         "manually_scored": int(final["manual_score"].notna().sum()),
     })
@@ -412,11 +437,11 @@ def build_graph(checkpointer):
     b.add_node("write_retune", write_retune)
     b.add_node("proceed", proceed)
     b.add_node("finalize", finalize)
-    b.add_edge(START, "decide")
+    b.add_conditional_edges(START, route_entry, {"decide": "decide", "finalize": "finalize"})
     b.add_edge("decide", "rationale")       # gate first, then explain
     b.add_conditional_edges(
         "rationale", route_after_decide,
-        {"retune": "write_retune", "sample": "proceed", "finalize": "finalize"},
+        {"retune": "write_retune", "sample": "proceed"},
     )
     b.add_edge("write_retune", END)
     b.add_edge("proceed", END)
