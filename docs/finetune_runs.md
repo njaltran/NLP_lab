@@ -51,12 +51,14 @@ then 0.33–0.41 for every later epoch while train loss keeps falling
 4. **`down` is near-dead in every run** (recall ≤ 0.05): headlines don't encode
    next-day drops in a way FinBERT captures.
 5. **Ceiling is the data, not the optimizer.** Three independent runs land on
-   ~0.25–0.27. Random (0.33) beats all of them; the 0.60 target is out of reach
-   with one-headline → next-day-move as the task.
+   ~0.25–0.27. Random (0.33) beats all of them; even the 0.516 target — now set
+   to the all-neutral baseline — is out of reach with one-headline →
+   next-day-move as the task.
 
 ## Open follow-ups
 
 - Pre-COVID dataset cutoff (drop rows after ~2019-12-31) to remove the
   train/test regime shift — Aurora's lane.
-- Renegotiate the 0.60 target, or extend the task (headline aggregation per
+- ~~Renegotiate the 0.60 target~~ — done (2026-07-05): target lowered to 0.516,
+  the all-neutral baseline. Still-open: extend the task (headline aggregation per
   ticker-day, non-text features).

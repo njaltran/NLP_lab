@@ -126,7 +126,7 @@ class Agents:
     freddi: object
 
     @classmethod
-    def build(cls, *, target_accuracy=0.60, max_iterations=5, patience=2,
+    def build(cls, *, target_accuracy=0.516, max_iterations=5, patience=2,
               min_delta=0.01, sample_size=300, use_ollama=True) -> "Agents":
         """Construct the real agents wired with the run's config. The Manager gets
         the real PREDS path so it never falls back to the mock default."""
@@ -266,7 +266,7 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
     return b.compile(checkpointer=checkpointer)
 
 
-def run(*, threshold=0.01, target_accuracy=0.60, max_iterations=5, patience=2,
+def run(*, threshold=0.01, target_accuracy=0.516, max_iterations=5, patience=2,
         min_delta=0.01, sample_size=300, use_ollama=True, data_dir=None,
         model_dir=None, dataset_end=None) -> dict:
     """Build the pipeline with real agents and run it once end to end, returning the

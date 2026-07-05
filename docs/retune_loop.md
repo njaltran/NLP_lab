@@ -19,7 +19,7 @@ finalize (once Freddi's explanations are back).
   outputs/finbert_finetuned` hands the fine-tuned weights folder through the
   pipeline to Nadi's node. Omitted (the default) means pretrained FinBERT —
   the current fine-tune beats pretrained on the COVID test window but still
-  trails the random baseline (0.33) and the 0.60 target (see
+  trails the random baseline (0.33) and the 0.516 target (see
   [`finetune_runs.md`](./finetune_runs.md)), so it stays off unless
   explicitly requested.
 
@@ -32,7 +32,7 @@ flowchart TD
     N["Nadi: classify<br/>FinBERT, or fine-tuned weights via model_dir<br/>on retune: template param swap, or Ollama rewrite<br/>from code_notes — validated on mock, else fallback<br/>writes predictions_test.csv"] --> S
     S["Sabina: evaluate on the VAL split<br/>deterministic metrics, LLM polishes reason + code_notes<br/>writes evaluation_report.json"] --> G
 
-    G{"Jack: gate<br/>accuracy at least 0.60? cap hit? converged?"}
+    G{"Jack: gate<br/>accuracy at least 0.516? cap hit? converged?"}
     G -->|retune| R
     R["Jack writes retune_request.json<br/>params from schedule, code_notes passed through"] --> N
 
@@ -70,7 +70,7 @@ partly the loop overfitting the test rows.
   Aurora's processing succeeds — a run that dies on its inputs leaves the
   previous deliverables intact (fine-tuned weights and the finetune report
   are always kept).
-- Proceed fires on any of: target accuracy (0.60) cleared, iteration cap (5)
+- Proceed fires on any of: target accuracy (0.516) cleared, iteration cap (5)
   hit, or convergence — the best of the last 2 iterations gained less than
   0.01 over the best before them.
 - On proceed, `select_best` restores the highest-scoring iteration's artifacts

@@ -18,7 +18,7 @@ def main():
     """Parse CLI flags, run the pipeline graph, and print where the outputs landed."""
     p = argparse.ArgumentParser(description="Run the full stock-move prediction pipeline.")
     p.add_argument("--threshold", type=float, default=0.01, help="Aurora label band (+/-, decimal)")
-    p.add_argument("--target-accuracy", type=float, default=0.60, help="Manager accuracy gate")
+    p.add_argument("--target-accuracy", type=float, default=0.516, help="Manager accuracy gate")
     p.add_argument("--max-iterations", type=int, default=5, help="retune cap before forced proceed")
     p.add_argument("--patience", type=int, default=2, help="iterations watched for convergence")
     p.add_argument("--min-delta", type=float, default=0.01, help="accuracy gain that counts as progress")

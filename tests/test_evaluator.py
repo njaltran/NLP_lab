@@ -45,7 +45,7 @@ def test_build_report_matches_mock_data_contract():
     assert report["proposal"] == {
         "recommended_action": "proceed",
         "reason": (
-            "accuracy 0.60 clears the 0.60 target; neutral class is weakest "
+            "accuracy 0.60 clears the 0.52 target; neutral class is weakest "
             "(0.33) but the iteration budget favours proceeding"
         ),
         "focus_labels": ["neutral"],
@@ -73,7 +73,7 @@ def test_report_written_to_evaluation_report_json():
 
 
 def test_low_accuracy_recommends_retune():
-    """If accuracy is below 0.60, the proposal should recommend retuning."""
+    """If accuracy is below 0.516, the proposal should recommend retuning."""
     rows = _load_mock_rows()
     for row in rows:
         row["predicted_label"] = "neutral"

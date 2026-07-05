@@ -19,13 +19,13 @@ EXPL = "mock_data/explanations.csv"
 BASE = {"target_accuracy": 0.60, "max_iterations": 5, "predictions_path": PRED}
 
 RETUNE_REPORT = {
-    "accuracy": 0.54,
+    "accuracy": 0.44,
     "below_threshold": True,
     "class_accuracy": {"up": 0.60, "down": 0.40, "neutral": 0.30},
     "misclassified_ids": ["FNSPID_00006", "FNSPID_00010"],
     "proposal": {
         "recommended_action": "retune",
-        "reason": "accuracy 0.54 below target",
+        "reason": "accuracy 0.44 below target",
         "focus_labels": ["down", "neutral"],
         "suggested_params": {"threshold": 0.5, "max_length": 128},
         "code_notes": "",

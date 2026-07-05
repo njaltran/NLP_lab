@@ -16,7 +16,7 @@ flowchart TD
     aurora["**Aurora** — Processing<br/>join + label move"]
     nadi["**Nadi** — Classifier<br/>FinBERT inference"]
     sabina["**Sabina** — Evaluator<br/>accuracy + per-class metrics"]
-    manager{"**Jack** — Manager<br/>threshold gate<br/>accuracy ≥ 0.60?"}
+    manager{"**Jack** — Manager<br/>threshold gate<br/>accuracy ≥ 0.516?"}
     freddi["**Freddi** — Explanation<br/>Ollama justification"]
     final[("final_results.csv<br/>final_report.json")]
 
@@ -29,7 +29,7 @@ flowchart TD
     manager -->|finalize| final
 ```
 
-**Loop:** the Manager gates on accuracy. Below the 0.60 target it writes a
+**Loop:** the Manager gates on accuracy. Below the 0.516 target it writes a
 `retune_request.json` and sends Nadi back around; once the target clears, the
 accuracy plateaus (convergence early-stop), or the 5-iteration cap forces it, it
 samples rows for Freddi, then joins the explanations into the final outputs. Each

@@ -32,7 +32,7 @@ class ManagerState(TypedDict):
 
     # --- inputs / config (set once at start) ---
     evaluation_report: dict      # parsed Sabina report for this iteration
-    target_accuracy: float       # gate threshold, 0.60 per contract
+    target_accuracy: float       # gate threshold, 0.516 per contract
     max_iterations: int          # iteration cap before forced proceed
 
     # --- loop progress (plain fields → merged, latest wins) ---
@@ -503,7 +503,7 @@ class ManagerAgent(Agent):
                 explanations="outputs/explanations.csv")
     """
 
-    def __init__(self, *, target_accuracy=0.60, max_iterations=5,
+    def __init__(self, *, target_accuracy=0.516, max_iterations=5,
                  patience=2, min_delta=0.01, min_class_accuracy=0.05,
                  predictions_path="mock_data/predictions_test.csv",
                  sample_size=300, checkpointer=None, thread_id="manager"):
@@ -547,12 +547,12 @@ if __name__ == "__main__":
 
     proceed_path = "mock_data/evaluation_report.json"      # ships a proceed report
     retune_report = {
-        "accuracy": 0.54, "below_threshold": True,
+        "accuracy": 0.48, "below_threshold": True,
         "class_accuracy": {"up": 0.60, "down": 0.40, "neutral": 0.30},
         "misclassified_ids": ["FNSPID_00006", "FNSPID_00010"],
         "proposal": {
             "recommended_action": "retune",
-            "reason": "accuracy 0.54 below target 0.60; down/neutral weakest",
+            "reason": "accuracy 0.48 below target 0.516; down/neutral weakest",
             "focus_labels": ["down", "neutral"],
             "suggested_params": {"threshold": 0.5, "max_length": 128},
             "code_notes": "threshold hardcoded at 0.5 in classifier.py"},

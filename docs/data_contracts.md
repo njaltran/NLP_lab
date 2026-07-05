@@ -70,7 +70,7 @@ Sabina scores the results, reviews `classifier.py`, and **makes a proposal**. Sh
 | Field | Type | Example | Notes |
 |---|---|---|---|
 | accuracy | float | 0.63 | overall accuracy on test set — classification metric, not MAE |
-| below_threshold | boolean | false | true if accuracy is below 0.60 |
+| below_threshold | boolean | false | true if accuracy is below 0.516 |
 | class_accuracy | object | {"up": 0.71, "down": 0.58, "neutral": 0.61} | accuracy per label |
 | misclassified_count | integer | 148 | total number of wrong predictions |
 | misclassified_ids | list | ["FNSPID_00423", ...] | article_ids of wrong predictions |
@@ -112,9 +112,9 @@ The approved proposal Nadi acts on — Sabina's proposal as accepted or overridd
 | Field | Type | Example | Notes |
 |---|---|---|---|
 | iteration | integer | 2 | loop counter, matches `decision.json` |
-| reason | string | accuracy 0.54 below target 0.60 | human-readable trigger |
-| current_accuracy | float | 0.54 | from the report that triggered the loop |
-| target_accuracy | float | 0.60 | threshold to clear |
+| reason | string | accuracy 0.48 below target 0.516 | human-readable trigger |
+| current_accuracy | float | 0.48 | from the report that triggered the loop |
+| target_accuracy | float | 0.516 | threshold to clear |
 | focus_labels | list | ["down", "neutral"] | approved focus classes |
 | misclassified_ids | list | ["FNSPID_00423", ...] | rows to inspect or reweight |
 | suggested_params | object | {"threshold": 0.5, "max_length": 128, "boost_factor": 1.25} | approved hyperparameters Nadi regenerates the code with; `boost_factor` (default 1.25) scales the softmax probability of each `focus_labels` class before renormalizing |
