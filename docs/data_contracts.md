@@ -71,7 +71,8 @@ Sabina scores the results, reviews `classifier.py`, and **makes a proposal**. Sh
 |---|---|---|---|
 | accuracy | float | 0.63 | overall accuracy on test set — classification metric, not MAE |
 | below_threshold | boolean | false | true if accuracy is below 0.60 |
-| class_accuracy | object | {"up": 0.71, "down": 0.58, "neutral": 0.61} | accuracy per label |
+| class_accuracy | object | {"up": 0.71, "down": 0.58, "neutral": 0.61} | accuracy per label; a label with zero rows is reported as 0.0 for compatibility |
+| class_support | object | {"up": 180, "down": 95, "neutral": 210} | number of evaluated rows per label, used to distinguish a missing label (`support = 0`) from a real class collapse |
 | misclassified_count | integer | 148 | total number of wrong predictions |
 | misclassified_ids | list | ["FNSPID_00423", ...] | article_ids of wrong predictions |
 | eval_split | string | val | which held-out split the metrics were computed on: `val` for retune-loop reports, `test` for the one final report |
@@ -187,6 +188,7 @@ One row per test prediction. Full combined table across all agents — do not mo
 | final_accuracy | float | 0.67 | accuracy after loop converged |
 | loop_iterations | integer | 2 | how many retune cycles ran before threshold cleared |
 | class_accuracy | object | {"up": 0.71, "down": 0.58, "neutral": 0.64} | per-class accuracy on test set |
+| class_support | object | {"up": 700, "down": 520, "neutral": 780} | number of evaluated test rows per label |
 | test_set_size | integer | 2000 | total rows in test split |
 | explanations_generated | integer | 300 | rows Freddi ran Ollama on |
 | manually_scored | integer | 45 | rows the team scored 1–5 |

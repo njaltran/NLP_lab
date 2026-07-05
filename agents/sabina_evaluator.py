@@ -99,14 +99,16 @@ def validate_predictions(rows: list[dict]) -> None:
 
 
 def compute_metrics(rows: list[dict]) -> dict:
-    """Compute overall and per-class classification accuracy."""
+    """Compute overall and per-class classification accuracy/support."""
     total = len(rows)
     wrong = [row for row in rows if row["label"] != row["predicted_label"]]
     class_accuracy = {}
+    class_support = {}
 
     for label_name in LABELS:
         class_rows = [row for row in rows if row["label"] == label_name]
         correct = sum(row["predicted_label"] == label_name for row in class_rows)
+        class_support[label_name] = len(class_rows)
         class_accuracy[label_name] = (
             round(correct / len(class_rows), 2) if class_rows else 0.0
         )
@@ -116,6 +118,7 @@ def compute_metrics(rows: list[dict]) -> dict:
         "accuracy": accuracy,
         "below_threshold": accuracy < TARGET_ACCURACY,
         "class_accuracy": class_accuracy,
+        "class_support": class_support,
         "misclassified_count": len(wrong),
         "misclassified_ids": [row["article_id"] for row in wrong],
     }
@@ -161,18 +164,39 @@ def _int_assignment(code_text: str, name: str, default: int) -> int:
         return default
 
 
-def _weakest_labels(class_accuracy: dict) -> list[str]:
-    """Return labels within FOCUS_MARGIN of the weakest class accuracy."""
-    weakest_score = min(class_accuracy.values())
+def _weakest_labels(class_accuracy: dict, class_support: dict | None = None) -> list[str]:
+    """Return labels within FOCUS_MARGIN of the weakest supported accuracy."""
+    supported = {
+        label_name: score
+        for label_name, score in class_accuracy.items()
+        if class_support is None or class_support.get(label_name, 0) > 0
+    }
+    if not supported:
+        supported = class_accuracy
+    weakest_score = min(supported.values())
     return [
         label_name
-        for label_name, score in class_accuracy.items()
+        for label_name, score in supported.items()
         if score <= weakest_score + FOCUS_MARGIN
     ]
 
 
 def review_classifier_code(code_text: str, class_accuracy: dict) -> str:
     """Return concise static observations from the generated classifier.py."""
+    return review_classifier_metrics(code_text, class_accuracy)
+
+
+def review_classifier_metrics(
+    code_text: str,
+    class_accuracy: dict,
+    class_support: dict | None = None,
+) -> str:
+    """Return concise static observations from metrics and classifier.py.
+
+    Zero-support labels keep class_accuracy=0.0 for backwards compatibility, but
+    they are not evidence of class collapse. `class_support` disambiguates a
+    missing label from a real near-zero recall.
+    """
     notes = []
     threshold = _find_assignment(code_text, "THRESHOLD")
     if threshold is not None:
@@ -181,15 +205,28 @@ def review_classifier_code(code_text: str, class_accuracy: dict) -> str:
     # A class with (near-)zero recall means the classifier has collapsed onto
     # the other classes — the aggregate accuracy then mostly reflects the label
     # mix, not real signal. Say so explicitly; it changes how a retune should go.
-    collapsed = [name for name, score in class_accuracy.items()
-                 if score < CLASS_COLLAPSE_FLOOR]
+    collapsed = [
+        name for name, score in class_accuracy.items()
+        if (class_support is None or class_support.get(name, 0) > 0)
+        and score < CLASS_COLLAPSE_FLOOR
+    ]
     if collapsed:
         notes.append(
             f"class collapse: {', '.join(collapsed)} recall near zero — "
             "aggregate accuracy mostly reflects the majority class share, not signal"
         )
 
-    weakest_labels = _weakest_labels(class_accuracy)
+    missing = [
+        name for name in class_accuracy
+        if class_support is not None and class_support.get(name, 0) == 0
+    ]
+    if missing:
+        notes.append(
+            f"no {', '.join(missing)} rows in this eval split — support is zero, "
+            "so this is not evidence of class collapse"
+        )
+
+    weakest_labels = _weakest_labels(class_accuracy, class_support)
     if "neutral" in weakest_labels:
         notes.append("the neutral band (+/-1%) may be too narrow for the neutral class")
 
@@ -211,8 +248,11 @@ def _suggest_retune_params(code_text: str) -> dict:
 
 def make_base_proposal(metrics: dict, code_text: str, code_notes: str) -> dict:
     """Create the contract proposal with deterministic action and params."""
-    weakest_score = min(metrics["class_accuracy"].values())
-    focus_labels = _weakest_labels(metrics["class_accuracy"])
+    focus_labels = _weakest_labels(
+        metrics["class_accuracy"],
+        metrics.get("class_support"),
+    )
+    weakest_score = min(metrics["class_accuracy"][label] for label in focus_labels)
 
     if metrics["below_threshold"]:
         reason = (
@@ -312,6 +352,7 @@ def _prompt_metrics(metrics: dict) -> dict:
         "accuracy": metrics["accuracy"],
         "below_threshold": metrics["below_threshold"],
         "class_accuracy": metrics["class_accuracy"],
+        "class_support": metrics["class_support"],
         "misclassified_count": metrics["misclassified_count"],
     }
 
@@ -377,13 +418,14 @@ def _build_llm_prompt(
         "Ground your reason in accuracy, target, weakest labels, and any useful "
         "classifier observation. Use the misclassified sample to describe the "
         "failure pattern when possible. Do not include markdown or extra keys.\n\n"
-        "Judge per-class accuracy, not just the aggregate: a classifier that "
-        "predicts one class for almost everything can score near that class's "
-        "share of the data while learning nothing — call that out in code_notes "
-        "if you see it. The eval_split field says which held-out split these "
-        "metrics come from; retunes are scored on val so the test split stays "
-        "unseen until the final report. Prefer observations that improve "
-        "balance across classes over ones that chase the aggregate number.\n\n"
+        "Judge per-class accuracy together with class_support, not just the "
+        "aggregate: a classifier that predicts one class for almost everything "
+        "can score near that class's share of the data while learning nothing. "
+        "A class with support 0 is absent from this split, not collapsed. The "
+        "eval_split field says which held-out split these metrics come from; "
+        "retunes are scored on val so the test split stays unseen until the "
+        "final report. Prefer observations that improve balance across classes "
+        "over ones that chase the aggregate number.\n\n"
         f"INPUT:\n{json.dumps(payload, indent=2)}"
     )
 
@@ -490,7 +532,11 @@ def build_report(
     rows = _select_split(rows, eval_split)
     validate_predictions(rows)
     metrics = {**compute_metrics(rows), "eval_split": eval_split}
-    code_notes = review_classifier_code(code_text, metrics["class_accuracy"])
+    code_notes = review_classifier_metrics(
+        code_text,
+        metrics["class_accuracy"],
+        metrics["class_support"],
+    )
     base_proposal = validate_proposal(
         make_base_proposal(metrics, code_text, code_notes),
         metrics,

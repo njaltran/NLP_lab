@@ -35,6 +35,7 @@ def test_build_report_matches_mock_data_contract():
     assert report["below_threshold"] is False
     assert report["eval_split"] == "test"
     assert report["class_accuracy"] == {"up": 0.67, "down": 0.75, "neutral": 0.33}
+    assert report["class_support"] == {"up": 3, "down": 4, "neutral": 3}
     assert report["misclassified_count"] == 4
     assert report["misclassified_ids"] == [
         "FNSPID_00006",
@@ -192,6 +193,55 @@ def test_code_notes_flag_class_collapse():
     notes = se.review_classifier_code("THRESHOLD = 0.2", class_accuracy)
     assert "class collapse" in notes
     assert "down" in notes and "neutral" in notes
+
+
+def test_zero_support_label_is_reported_but_not_treated_as_collapse():
+    """A missing label in the chosen split has accuracy 0.0 for compatibility,
+    but class_support=0 tells Jack and reviewers it is not a collapse."""
+    rows = [
+        {
+            "article_id": "r1",
+            "date": "2020-01-01",
+            "ticker": "AAPL",
+            "article_title": "Apple rises",
+            "price_t": "100",
+            "price_t1": "102",
+            "pct_change": "2.0",
+            "label": "up",
+            "predicted_label": "up",
+            "confidence": "0.90",
+            "prob_up": "0.90",
+            "prob_down": "0.05",
+            "prob_neutral": "0.05",
+            "split": "test",
+        },
+        {
+            "article_id": "r2",
+            "date": "2020-01-02",
+            "ticker": "AAPL",
+            "article_title": "Apple flat",
+            "price_t": "102",
+            "price_t1": "102.5",
+            "pct_change": "0.5",
+            "label": "neutral",
+            "predicted_label": "neutral",
+            "confidence": "0.85",
+            "prob_up": "0.05",
+            "prob_down": "0.10",
+            "prob_neutral": "0.85",
+            "split": "test",
+        },
+    ]
+
+    report = se.build_report(rows, "THRESHOLD = 0.5\nMAX_LENGTH = 128\n")
+
+    assert report["accuracy"] == 1.0
+    assert report["class_accuracy"] == {"up": 1.0, "down": 0.0, "neutral": 1.0}
+    assert report["class_support"] == {"up": 1, "down": 0, "neutral": 1}
+    assert report["proposal"]["recommended_action"] == "proceed"
+    assert report["proposal"]["focus_labels"] == ["up", "neutral"]
+    assert "not evidence of class collapse" in report["proposal"]["code_notes"]
+    assert "class collapse:" not in report["proposal"]["code_notes"]
 
 
 def test_llm_review_can_supply_valid_judgment_text():

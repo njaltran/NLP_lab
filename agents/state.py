@@ -37,7 +37,7 @@ class PipelineState(TypedDict, total=False):
 
     # ── Handoff 3: Evaluator → Manager ──────────────────────────────────────
     # docs/data_contracts.md §Handoff 3
-    evaluation_report: dict     # accuracy, below_threshold, class_accuracy,
+    evaluation_report: dict     # accuracy, below_threshold, class_accuracy, class_support,
                                 # misclassified_count, misclassified_ids, proposal
 
     # ── Handoff 3b: Manager decision ────────────────────────────────────────
@@ -58,5 +58,5 @@ class PipelineState(TypedDict, total=False):
     # ── Handoff 6: Final output ──────────────────────────────────────────────
     # docs/data_contracts.md §Handoff 6
     final_results_path: str     # absolute path to final_results.csv
-    final_report: dict          # final_accuracy, loop_iterations, class_accuracy,
+    final_report: dict          # final_accuracy, loop_iterations, class_accuracy, class_support,
                                 # test_set_size, explanations_generated, manually_scored

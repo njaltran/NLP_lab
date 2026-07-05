@@ -6,6 +6,11 @@
     "down": 0.75,
     "neutral": 0.33
   },
+  "class_support": {
+    "up": 3,
+    "down": 4,
+    "neutral": 3
+  },
   "misclassified_count": 4,
   "misclassified_ids": [
     "FNSPID_00006",
