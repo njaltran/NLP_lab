@@ -69,19 +69,6 @@ def _write_json(name: str, obj: dict) -> None:
         json.dump(obj, f, indent=2)
 
 
-def _test_rows(preds):
-    """Keep only the TEST rows of a predictions frame. Predictions carry val +
-    test rows; the val rows exist for the loop's own scoring, while Freddi's
-    sample and the finals must be test-only. Loud on a contract violation —
-    silently shipping mixed rows is the leak the val split exists to prevent."""
-    if "split" not in preds.columns:
-        raise ValueError("predictions file has no split column (Handoff 2)")
-    test = preds[preds["split"] == "test"]
-    if test.empty:
-        raise ValueError("predictions file has no split=test rows")
-    return test
-
-
 def _write_decision(state: "ManagerState") -> None:
     """decision.json — Jack's record, written every iteration (Handoff 3b). The
     file is overwritten each iteration, so `accuracy_history` (cumulative through
