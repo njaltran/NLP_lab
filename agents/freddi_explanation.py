@@ -153,7 +153,7 @@ def _build_chain(model: str, base_url: str, timeout: float):
         model=model,
         base_url=base_url,
         temperature=0.3,            # low: grounded, low-variance explanations
-        num_predict=220,            # room for the JSON reasoning + explanation
+        num_predict=350,            # room for the JSON reasoning + explanation
         keep_alive=DEFAULT_KEEP_ALIVE,
         client_kwargs={"timeout": timeout},
     )
