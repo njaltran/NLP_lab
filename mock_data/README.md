@@ -7,7 +7,7 @@ One consistent story runs through the files: 12 test articles; FinBERT needs **t
 - **Cycle 1** fails at accuracy **0.54** → Sabina recommends retune → Jack approves → `retune_request.json` (iteration 1) goes back to Nadi.
 - **Cycle 2** converges at accuracy **0.67** → this is the run captured in `predictions_test.csv` / `evaluation_report.json` / `decision.json` (proceed) and the `final_*` outputs.
 
-`neutral` is the weakest class (0.33) — the realistic failure mode. Misclassified in the converged run: `FNSPID_00006`, `FNSPID_00010`, `FNSPID_00011`, `FNSPID_00012`.
+`small` is the weakest class (0.33) — the realistic failure mode. Misclassified in the converged run: `FNSPID_00006`, `FNSPID_00010`, `FNSPID_00011`, `FNSPID_00012`.
 
 | File | Handoff | Producer → consumer |
 |---|---|---|
@@ -22,6 +22,6 @@ One consistent story runs through the files: 12 test articles; FinBERT needs **t
 | `final_results.csv` + `final_report.json` | 6 | Jack → final output |
 
 Notes:
-- `predictions_test.csv` carries `prob_up/prob_down/prob_neutral`; `confidence` = the max of the three, and `predicted_label` = the argmax. `sample_for_explanation.csv` forwards the same `prob_*` so Freddi can see how close each call was.
+- `predictions_test.csv` carries `prob_big/prob_small`; `confidence` = the max of the two, and `predicted_label` = the argmax. `sample_for_explanation.csv` forwards the same `prob_*` so Freddi can see how close each call was.
 - `decision.json` (proceed) and `retune_request.json` (retune) show the **two branches** of Handoff 3b. In a single converged run only one is written; both are provided here as format examples.
 - `classifier.py` is illustrative generated code — it produces output of the right shape but real FinBERT probabilities will differ from the hand-tuned values in `predictions_test.csv`.

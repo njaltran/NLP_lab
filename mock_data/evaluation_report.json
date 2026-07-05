@@ -2,9 +2,8 @@
   "accuracy": 0.6,
   "below_threshold": false,
   "class_accuracy": {
-    "up": 0.67,
-    "down": 0.75,
-    "neutral": 0.33
+    "big": 0.71,
+    "small": 0.33
   },
   "misclassified_count": 4,
   "misclassified_ids": [
@@ -16,11 +15,11 @@
   "eval_split": "test",
   "proposal": {
     "recommended_action": "proceed",
-    "reason": "accuracy 0.60 clears the 0.60 target; neutral class is weakest (0.33) but the iteration budget favours proceeding",
+    "reason": "accuracy 0.60 clears the 0.60 target; small class is weakest (0.33) but the iteration budget favours proceeding",
     "focus_labels": [
-      "neutral"
+      "small"
     ],
     "suggested_params": {},
-    "code_notes": "threshold hardcoded at 0.5 in classifier.py; the neutral band (+/-1%) may be too narrow for the neutral class"
+    "code_notes": "threshold hardcoded at 0.5 in classifier.py; the small band (+/-1%) may be too narrow for the small class"
   }
 }
