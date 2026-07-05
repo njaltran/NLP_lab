@@ -118,7 +118,7 @@ def test_outputs_match_contract(outdir, proceed_report):
 
     rep = json.loads((outdir / "final_report.json").read_text())
     assert set(rep) == {
-        "final_accuracy", "loop_iterations", "class_accuracy",
+        "final_accuracy", "loop_iterations", "class_accuracy", "class_support",
         "test_set_size", "explanations_generated", "manually_scored"}
     assert rep["test_set_size"] == len(fin)
     assert rep["explanations_generated"] == int((fin.explanation.fillna("") != "").sum())
@@ -258,6 +258,24 @@ def test_class_collapse_blocks_cleared_target():
     assert out["final_action"] == "retune"
 
 
+def test_zero_support_class_does_not_block_cleared_target():
+    """A label absent from the eval split is not a model collapse."""
+    state = {
+        "evaluation_report": {
+            "accuracy": 0.75,
+            "class_accuracy": {"up": 0.75, "down": 0.0, "neutral": 0.80},
+            "class_support": {"up": 20, "down": 0, "neutral": 20},
+            "proposal": {"recommended_action": "proceed"},
+        },
+        "target_accuracy": 0.60,
+        "max_iterations": 5,
+    }
+
+    out = jm.decide(state)
+
+    assert out["final_action"] == "proceed"
+
+
 def test_report_score_ranks_collapsed_below_healthy():
     """The best-iteration snapshot must rank on the same rule as the gate: a
     collapsed high-accuracy pass never beats a healthy lower-accuracy one."""
@@ -265,6 +283,16 @@ def test_report_score_ranks_collapsed_below_healthy():
     collapsed = {"accuracy": 0.65, "class_accuracy": {"up": 0.0, "down": 0.0, "neutral": 1.0}}
     assert jm.report_score(healthy) > jm.report_score(collapsed)
     assert jm.report_score(healthy) == 0.39   # healthy score IS the accuracy
+
+
+def test_report_score_ignores_zero_support_classes():
+    report = {
+        "accuracy": 0.65,
+        "class_accuracy": {"up": 0.65, "down": 0.0, "neutral": 0.70},
+        "class_support": {"up": 10, "down": 0, "neutral": 10},
+    }
+
+    assert jm.report_score(report) == 0.65
 
 
 def test_regression_reverts_to_best_params_and_perturbs():

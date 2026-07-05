@@ -178,10 +178,16 @@ def _is_collapsed(report: dict, floor: float) -> bool:
     """True when any class's recall sits below `floor` — the aggregate accuracy
     is then a degenerate win (e.g. everything predicted neutral).
 
-    Note: Sabina reports 0.0 for a class absent from the test set, which reads
-    as a collapse here — see the caveat in docs/retune_loop.md."""
+    Sabina's `class_support` disambiguates a real zero-recall collapse from a
+    split where a label has no rows. Missing support keeps old reports
+    conservative: all class_accuracy entries are treated as supported."""
     class_accuracy = report.get("class_accuracy", {})
-    return bool(class_accuracy) and min(class_accuracy.values()) < floor
+    class_support = report.get("class_support")
+    supported_scores = [
+        score for label, score in class_accuracy.items()
+        if class_support is None or class_support.get(label, 0) > 0
+    ]
+    return bool(supported_scores) and min(supported_scores) < floor
 
 
 def report_score(report: dict, floor: float = 0.05) -> float:
@@ -362,6 +368,7 @@ def finalize(state: ManagerState) -> dict:
         "final_accuracy": report.get("accuracy"),
         "loop_iterations": state["iteration"],
         "class_accuracy": report.get("class_accuracy", {}),
+        "class_support": report.get("class_support", {}),
         "test_set_size": int(len(final)),
         "explanations_generated": int((final["explanation"] != "").sum()),
         "manually_scored": int(final["manual_score"].notna().sum()),

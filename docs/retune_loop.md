@@ -62,10 +62,9 @@ partly the loop overfitting the test rows.
   best iteration's params and perturbs one knob.
 - Aggregate accuracy can't clear the target while any class sits below the
   per-class recall floor (0.05) — an all-neutral collapse no longer "passes".
-  Known limit: Sabina reports 0.0 for a class with zero rows in the test set,
-  indistinguishable from a real collapse — a test window missing a label can
-  never clear the target and exits via cap/convergence instead. Needs
-  per-class support in `evaluation_report.json` to fix (Sabina's lane).
+  Sabina also reports `class_support` in `evaluation_report.json`, so Jack can
+  tell a real zero-recall collapse from a split that simply contains no rows
+  for one label. Labels with `support = 0` do not block a cleared target.
 - Each run clears the previous run's loop artifacts from `outputs/` once
   Aurora's processing succeeds — a run that dies on its inputs leaves the
   previous deliverables intact (fine-tuned weights and the finetune report
