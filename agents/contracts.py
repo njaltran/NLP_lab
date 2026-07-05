@@ -14,7 +14,7 @@ from typing import Iterable
 
 # Used by Nadi (`agents/nadi_classifier.py`) to reject bad generated labels and
 # by Sabina (`agents/sabina_evaluator.py`) to score per-label accuracy.
-LABELS = ("up", "down", "neutral")
+LABELS = ("big", "small")
 
 # Used by Sabina's prediction validation; probabilities are rounded, so the
 # contract allows a small tolerance instead of requiring exact sums.
@@ -25,14 +25,14 @@ PROBABILITY_TOLERANCE = 0.02
 PREDICTION_COLUMNS = [
     "article_id", "date", "ticker", "article_title", "price_t", "price_t1",
     "pct_change", "label", "predicted_label", "confidence",
-    "prob_up", "prob_down", "prob_neutral", "split",
+    "prob_big", "prob_small", "split",
 ]
 
 # Handoff 4: Jack writes these columns in sample_for_explanation.csv; Freddi
 # reads them before generating explanations.
 EXPLANATION_SAMPLE_COLUMNS = [
     "article_id", "article_title", "predicted_label", "actual_label",
-    "confidence", "prob_up", "prob_down", "prob_neutral",
+    "confidence", "prob_big", "prob_small",
 ]
 
 # Handoff 5: Freddi writes these columns in explanations.csv; Jack reads them
@@ -110,7 +110,7 @@ def build_explanation_sample(predictions, sample_size: int = 300):
     predictions = _test_rows(predictions)
     sample = (predictions[[
         "article_id", "article_title", "predicted_label", "label",
-        "confidence", "prob_up", "prob_down", "prob_neutral",
+        "confidence", "prob_big", "prob_small",
     ]].rename(columns={"label": "actual_label"}))
     n = min(len(sample), sample_size)
     if n < len(sample):
