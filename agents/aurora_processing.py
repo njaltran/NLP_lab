@@ -64,11 +64,9 @@ def _get_t_and_t1(ticker, date_str, cache):
 
 
 def _assign_label(pct_change, threshold):
-    if pct_change > threshold * 100:
-        return "up"
-    elif pct_change < -threshold * 100:
-        return "down"
-    return "neutral"
+    # Magnitude reframe: predict whether tomorrow is a BIG move (|Δ| beyond the
+    # band) or a SMALL/quiet move. threshold is a decimal; pct_change is percent.
+    return "big" if abs(pct_change) > threshold * 100 else "small"
 
 
 def _assign_split(df, dataset_end=None):
@@ -218,7 +216,7 @@ if __name__ == "__main__":
         description="Run the Processing Agent as a LangGraph node."
     )
     parser.add_argument("--threshold", type=float, default=0.01,
-                        help="Price-change threshold in decimal form (default: 0.01 = ±1%%)")
+                        help="Big/small move band in decimal form (default: 0.01 = ±1%%)")
     parser.add_argument("--data-dir", type=str, default=None,
                         help="Data directory containing fnspid_raw.csv (default: data/)")
     parser.add_argument("--dataset-end", type=str, default=None,
