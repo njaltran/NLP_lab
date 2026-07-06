@@ -174,16 +174,30 @@ def _ollama_generate(prompt: str) -> str:
     return answer.get("response", "")
 
 
-def _build_llm_prompt(focus_labels, code_notes) -> str:
+def _build_llm_prompt(focus_labels, code_notes, collapsed_label="") -> str:
     """Ask the LLM to rewrite ONLY the classify() function, adapting to the
     evaluator's feedback. We tell it exactly which globals it may use and what
-    the function must return, so the output plugs straight into the template."""
+    the function must return, so the output plugs straight into the template.
+
+    `collapsed_label` (from the Manager, structured rather than embedded in
+    `code_notes` prose) gets its own explicit instruction: a small local model
+    is more likely to act on a direct command than to infer "near-zero recall"
+    buried in free-text notes means "change the decision boundary for this
+    specific class"."""
+    collapse_instruction = (
+        f"\nThe '{collapsed_label}' class has collapsed to near-zero recall — the "
+        f"classifier almost never predicts it. Change classify() so it is "
+        f"specifically more willing to predict '{collapsed_label}' (e.g. a lower "
+        f"effective bar for that class), not just a general accuracy tweak.\n"
+        if collapsed_label else ""
+    )
     return (
         "You are the classifier agent in a stock-move prediction pipeline.\n"
         "Rewrite ONLY the Python function `classify(title)` to improve accuracy,\n"
         "responding to this feedback from the evaluator.\n\n"
         f"Weakest classes to focus on: {focus_labels}\n"
-        f"Evaluator notes: {code_notes or 'none'}\n\n"
+        f"Evaluator notes: {code_notes or 'none'}\n"
+        f"{collapse_instruction}\n"
         "Rules:\n"
         "- Return ONLY the function, starting with `def classify(title):`.\n"
         "- It must return a dict with exactly these keys: predicted_label,\n"
@@ -271,9 +285,10 @@ def try_llm_classifier(default_code, retune_req, llm_fn=None):
     call_llm = llm_fn or _ollama_generate
     focus_labels = retune_req.get("focus_labels", [])
     code_notes = retune_req.get("code_notes") or retune_req.get("reason")
+    collapsed_label = retune_req.get("collapsed_label", "")
 
     try:
-        answer = call_llm(_build_llm_prompt(focus_labels, code_notes))
+        answer = call_llm(_build_llm_prompt(focus_labels, code_notes, collapsed_label))
     except Exception as error:  # network down, timeout, bad server, ...
         print(f"[nadi] LLM call failed ({error}); keeping the template classifier")
         return None

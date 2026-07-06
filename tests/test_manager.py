@@ -126,24 +126,45 @@ def test_outputs_match_contract(outdir, proceed_report):
 
 
 def test_retune_request_carries_code_notes(outdir):
-    """Nadi's LLM code adaptation reads `code_notes` from retune_request.json,
-    so the manager must pass Sabina's observations through unchanged."""
+    """Nadi's LLM code adaptation reads `code_notes` from retune_request.json.
+    Sabina's per-report observations are kept verbatim, with the Manager's own
+    cross-iteration trend/collapse note appended — context Sabina structurally
+    can't provide since she only scores one report at a time."""
     g, cfg = _graph(), {"configurable": {"thread_id": "notes"}}
     report = json.loads(json.dumps(RETUNE_REPORT))
     report["proposal"]["code_notes"] = "threshold hardcoded at 0.5 in classifier.py"
     g.invoke({**BASE, "evaluation_report": report}, cfg)
     req = json.loads((outdir / "retune_request.json").read_text())
-    assert req["code_notes"] == "threshold hardcoded at 0.5 in classifier.py"
+    assert req["code_notes"] == (
+        "threshold hardcoded at 0.5 in classifier.py; "
+        "trend 0.54; collapsed class: none")
+    assert req["collapsed_label"] == ""
 
 
-def test_retune_request_code_notes_empty_when_proposal_omits_them(outdir):
+def test_retune_request_code_notes_falls_back_to_manager_note(outdir):
+    """When Sabina's proposal omits code_notes, Nadi still gets the Manager's
+    trend/collapse note rather than an empty string."""
     g, cfg = _graph(), {"configurable": {"thread_id": "notes-empty"}}
     report = {"accuracy": 0.37,
               "proposal": {"recommended_action": "retune", "focus_labels": ["down"],
                            "suggested_params": {"threshold": 0.5, "max_length": 128}}}
     g.invoke({**BASE, "evaluation_report": report}, cfg)
     req = json.loads((outdir / "retune_request.json").read_text())
-    assert req["code_notes"] == ""
+    assert req["code_notes"] == "trend 0.37; collapsed class: none"
+    assert req["collapsed_label"] == ""
+
+
+def test_retune_request_collapsed_label_structured_for_nadi(outdir):
+    """A genuinely collapsed class surfaces as its own field (`collapsed_label`),
+    not just embedded in `code_notes` prose, so Nadi's LLM prompt can branch on
+    it directly instead of parsing free text."""
+    g, cfg = _graph(), {"configurable": {"thread_id": "collapsed"}}
+    report = json.loads(json.dumps(RETUNE_REPORT))
+    report["class_accuracy"] = {"up": 0.03, "down": 0.40, "neutral": 0.60}
+    g.invoke({**BASE, "evaluation_report": report}, cfg)
+    req = json.loads((outdir / "retune_request.json").read_text())
+    assert req["collapsed_label"] == "up"
+    assert "collapsed class: up (recall 0.03, floor 0.05)" in req["code_notes"]
 
 
 # --- public ManagerAgent.run() API ---------------------------------------

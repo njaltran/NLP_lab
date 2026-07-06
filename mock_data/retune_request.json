@@ -20,5 +20,6 @@
     "max_length": 128,
     "boost_factor": 1.25
   },
-  "code_notes": "threshold hardcoded at 0.5 in classifier.py"
+  "code_notes": "threshold hardcoded at 0.5 in classifier.py; trend 0.54; collapsed class: none",
+  "collapsed_label": ""
 }

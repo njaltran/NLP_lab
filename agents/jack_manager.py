@@ -186,6 +186,24 @@ def _is_collapsed(report: dict, floor: float) -> bool:
     return _collapse_detail(report, floor) is not None
 
 
+def _trend_str(history: list, current: float) -> str:
+    """Accuracy trend oldest-to-newest, ending with the current iteration. Shared
+    by the rationale prompt and Nadi's retune request — cross-iteration memory
+    only the Manager has; Sabina scores one report at a time and can't see it."""
+    return " -> ".join(f"{a:.2f}" for a in history) if history else f"{current:.2f}"
+
+
+def _collapse_str(report: dict, floor: float) -> str:
+    """One-line collapse summary for prompts: `"none"`, or the offending class
+    and its recall against the floor. Shared by the rationale prompt and Nadi's
+    retune request, both grounded in the same `_collapse_detail`."""
+    detail = _collapse_detail(report, floor)
+    if not detail:
+        return "none"
+    label, score = detail
+    return f"{label} (recall {score:.2f}, floor {floor:.2f})"
+
+
 def report_score(report: dict, floor: float = 0.05) -> float:
     """Rank an iteration for best-snapshot purposes: plain accuracy, pushed below
     every healthy score when a class collapsed. One definition shared with the
@@ -310,6 +328,21 @@ def write_retune(state: ManagerState) -> dict:
     proposal = report.get("proposal", {})
     overrides = state.get("overrides", {})
     _write_decision(state)
+
+    # Sabina's code_notes are per-report static observations (e.g. a hardcoded
+    # threshold) — she scores one report at a time and has no memory of earlier
+    # iterations. The Manager does: fold in the accuracy trend and the specific
+    # collapsed class (if any) so Nadi's optional LLM code adaptation sees
+    # something Sabina structurally can't provide, not a restatement of it.
+    # Appended (not a fallback): Sabina's code_notes is almost always non-empty
+    # in practice, so `code_notes or reason` on the Nadi side never fired this.
+    floor = state.get("min_class_accuracy", 0.05)
+    detail = _collapse_detail(report, floor)
+    manager_note = (f"trend {_trend_str(state.get('accuracy_history', []), state['accuracy'])}; "
+                    f"collapsed class: {_collapse_str(report, floor)}")
+    sabina_notes = proposal.get("code_notes", "")
+    code_notes = f"{sabina_notes}; {manager_note}" if sabina_notes else manager_note
+
     _write_json("retune_request.json", {
         "iteration": state["iteration"],
         "reason": proposal.get("reason", state["notes"]),
@@ -319,9 +352,12 @@ def write_retune(state: ManagerState) -> dict:
         "misclassified_ids": report.get("misclassified_ids", []),
         "suggested_params": {**proposal.get("suggested_params", {}),
                              **overrides.get("suggested_params", {})},
-        # Sabina's code observations, passed through unchanged — Nadi's optional
-        # LLM code adaptation prompts with these (falls back to `reason` if empty).
-        "code_notes": proposal.get("code_notes", ""),
+        # Sabina's code observations plus the Manager's cross-iteration context —
+        # Nadi's optional LLM code adaptation prompts with this combined string.
+        "code_notes": code_notes,
+        # Structured (not embedded in `code_notes` prose) so Nadi's LLM prompt can
+        # react to it explicitly instead of parsing free text for it.
+        "collapsed_label": detail[0] if detail else "",
     })
     return {"decision_log": [f"iteration {state['iteration']}: wrote retune_request.json"]}
 
@@ -437,14 +473,11 @@ def _llama_rationale(state: ManagerState) -> str:
     # Trend: the full accuracy history including this iteration (see `decide`,
     # which appends before `rationale` runs) — lets the LLM characterize the
     # trajectory instead of judging a single number in isolation.
-    history = state.get("accuracy_history", [])
-    trend = " -> ".join(f"{a:.2f}" for a in history) if history else f"{state['accuracy']:.2f}"
+    trend = _trend_str(state.get("accuracy_history", []), state["accuracy"])
 
     # Collapse: same floor and detection the gate itself used (`decide`), so the
     # rationale can never flag a collapse the gate didn't also see.
-    detail = _collapse_detail(report, state.get("min_class_accuracy", 0.05))
-    collapse_str = (f"{detail[0]} (recall {detail[1]:.2f}, floor "
-                    f"{state.get('min_class_accuracy', 0.05):.2f})") if detail else "none"
+    collapse_str = _collapse_str(report, state.get("min_class_accuracy", 0.05))
 
     # Any HF failure (rate limit, gated-model 403, timeout, malformed response)
     # must not abort the graph — the gate's decision still needs to be written.

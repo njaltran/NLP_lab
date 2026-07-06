@@ -201,6 +201,55 @@ def test_llm_codegen_falls_back_on_bad_output(outdir):
     assert "def classify(title: str) -> dict:" in content
 
 
+def test_llm_prompt_gives_explicit_instruction_for_collapsed_label(outdir):
+    """`collapsed_label` (structured, from the Manager) must produce a concrete
+    instruction in the prompt — not just ride along inertly in `code_notes` and
+    hope the LLM infers what to do with it."""
+    from agents.nadi_classifier import generate_code
+
+    captured = {}
+
+    def fake_llm(prompt):
+        captured["prompt"] = prompt
+        return "def classify(title): return ("  # content doesn't matter here
+
+    code_path = outdir / "classifier.py"
+    state = {
+        "classifier_code_path": str(code_path),
+        "retune_request": {
+            "iteration": 1,
+            "focus_labels": ["up"],
+            "code_notes": "trend 0.54; collapsed class: up (recall 0.03, floor 0.05)",
+            "collapsed_label": "up",
+        },
+        "llm_fn": fake_llm,
+    }
+    generate_code(state)
+    assert "'up' class has collapsed to near-zero recall" in captured["prompt"]
+    assert "more willing to predict 'up'" in captured["prompt"]
+
+
+def test_llm_prompt_omits_collapse_instruction_when_none(outdir):
+    """No `collapsed_label` (the common case) means no collapse instruction —
+    the prompt shouldn't invent one."""
+    from agents.nadi_classifier import generate_code
+
+    captured = {}
+
+    def fake_llm(prompt):
+        captured["prompt"] = prompt
+        return "def classify(title): return ("
+
+    code_path = outdir / "classifier.py"
+    state = {
+        "classifier_code_path": str(code_path),
+        "retune_request": {"iteration": 1, "focus_labels": ["down"]},
+        "llm_fn": fake_llm,
+    }
+    generate_code(state)
+    assert "collapsed to near-zero recall" not in captured["prompt"]
+
+
 @pytest.mark.slow
 def test_llm_codegen_used_when_valid(outdir):
     """A valid LLM classify() that passes the mock run is spliced in. Marked
