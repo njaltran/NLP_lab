@@ -33,11 +33,11 @@ class Agent(ABC):
         self._config = {"configurable": {"thread_id": thread_id}}
 
     @abstractmethod
-    def build_graph(self, checkpointer):
+    def build_graph(self, checkpointer): #what do the agents do?
         """Return the compiled LangGraph for this agent."""
 
     @abstractmethod
-    def run(self, **inputs) -> dict:
+    def run(self, **inputs) -> dict: #how do the agents run?
         """Read contract input file(s), invoke the graph, write contract
         output file(s), and return the final state dict."""
 

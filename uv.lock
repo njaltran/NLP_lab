@@ -1448,6 +1448,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "altair" },
+    { name = "certifi" },
     { name = "dlt", extra = ["duckdb"] },
     { name = "huggingface-hub" },
     { name = "langchain-core" },
@@ -1470,6 +1471,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "altair", specifier = ">=6.2.2" },
+    { name = "certifi", specifier = ">=2024.0.0" },
     { name = "dlt", extras = ["duckdb"], specifier = ">=1.0.0" },
     { name = "huggingface-hub", specifier = ">=1.21.0" },
     { name = "langchain-core", specifier = ">=0.3.0" },

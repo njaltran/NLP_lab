@@ -2,10 +2,11 @@
 
 Findings-first view of the stock-move pipeline, built to be projected to a
 class: big numbers, one finding per chart, almost no prose. Reads only the
-real contract files the agents wrote to `outputs/` (never `mock_data/` —
-missing files render as placeholders, not fake numbers) plus the Manager's
-own `decision.json` history. Read-only: writes nothing, changes no agent's
-output format. Run with:
+real contract files the agents wrote, fetched straight from the GitHub repo
+(github.com/njaltran/NLP_lab/tree/main/outputs) instead of a local outputs/
+run (never `mock_data/` — missing/unreachable files render as placeholders,
+not fake numbers) plus the Manager's own `decision.json` history. Read-only:
+writes nothing, changes no agent's output format. Run with:
 
     uv run marimo run dashboard.py       # app view (present this)
     uv run marimo edit dashboard.py      # interactive
@@ -19,14 +20,25 @@ app = marimo.App(width="medium")
 
 @app.cell
 def _():
+    import io
     import json
-    import os
+    import ssl
+    import urllib.request
 
     import altair as alt
+    import certifi
     import marimo as mo
     import pandas as pd
 
-    return alt, json, mo, os, pd
+    return alt, certifi, io, json, mo, pd, ssl, urllib
+
+
+@app.cell
+def _():
+    # Data source: the GitHub repo's outputs/, not a local pipeline run —
+    # https://github.com/njaltran/NLP_lab/tree/main/outputs
+    GITHUB_RAW_BASE = "https://raw.githubusercontent.com/njaltran/NLP_lab/main/outputs"
+    return (GITHUB_RAW_BASE,)
 
 
 @app.cell
@@ -64,21 +76,27 @@ def _(alt):
 
 
 @app.cell
-def _(json, os, pd):
+def _(GITHUB_RAW_BASE, certifi, io, json, pd, ssl, urllib):
     # Real run outputs ONLY — never mock_data. Mock numbers on a projector are
-    # worse than an empty chart, so missing files render as placeholders.
-    DATA_DIR = "outputs"
+    # worse than an empty chart, so missing/unreachable files render as
+    # placeholders.
+    DATA_DIR = GITHUB_RAW_BASE
+    _ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+
+    def _fetch(name):
+        try:
+            with urllib.request.urlopen(f"{DATA_DIR}/{name}", timeout=10, context=_ssl_ctx) as resp:
+                return resp.read().decode("utf-8")
+        except Exception:
+            return None
 
     def _load_json(name):
-        path = os.path.join(DATA_DIR, name)
-        if not os.path.exists(path):
-            return {}
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
+        raw = _fetch(name)
+        return json.loads(raw) if raw else {}
 
     def _load_csv(name):
-        path = os.path.join(DATA_DIR, name)
-        return pd.read_csv(path) if os.path.exists(path) else pd.DataFrame()
+        raw = _fetch(name)
+        return pd.read_csv(io.StringIO(raw)) if raw else pd.DataFrame()
 
     preds = _load_csv("predictions_test.csv")
     explanations = _load_csv("explanations.csv")
