@@ -161,20 +161,29 @@ def _next_params(tried: list, history: list = ()) -> dict:
     return _RETUNE_SCHEDULE[-1]
 
 
-def _is_collapsed(report: dict, floor: float) -> bool:
-    """True when any class's recall sits below `floor` — the aggregate accuracy
-    is then a degenerate win (e.g. everything predicted neutral).
+def _collapse_detail(report: dict, floor: float) -> tuple[str, float] | None:
+    """The weakest supported class and its recall when it sits below `floor` —
+    the aggregate accuracy is then a degenerate win (e.g. everything predicted
+    neutral). None when no class has collapsed.
 
     Sabina's `class_support` disambiguates a real zero-recall collapse from a
     split where a label has no rows. Missing support keeps old reports
     conservative: all class_accuracy entries are treated as supported."""
     class_accuracy = report.get("class_accuracy", {})
     class_support = report.get("class_support")
-    supported_scores = [
-        score for label, score in class_accuracy.items()
+    supported = [
+        (label, score) for label, score in class_accuracy.items()
         if class_support is None or class_support.get(label, 0) > 0
     ]
-    return bool(supported_scores) and min(supported_scores) < floor
+    if not supported:
+        return None
+    label, score = min(supported, key=lambda item: item[1])
+    return (label, score) if score < floor else None
+
+
+def _is_collapsed(report: dict, floor: float) -> bool:
+    """True when any class's recall sits below `floor` (see `_collapse_detail`)."""
+    return _collapse_detail(report, floor) is not None
 
 
 def report_score(report: dict, floor: float = 0.05) -> float:
@@ -377,18 +386,39 @@ You did NOT make it and you CANNOT change it.
 
 ### YOUR TASK ###
 Write a 2-3 sentence rationale explaining WHY the decision is reasonable, grounded in
-the accuracy, the target, and the evaluator's proposal.
+the accuracy, the target, the evaluator's proposal, the accuracy trend across
+iterations, and (when given) a collapsed class.
 
 ### CONSTRAINTS ###
 - DO NOT dispute, second-guess, or suggest changing the decision.
+- Cite ONLY numbers you were given — never invent a cause, a class, or a trend that
+  isn't in the input.
+- The trend is listed oldest to newest, ending with the current iteration. "Last
+  iteration" means the SECOND-TO-LAST number, never the first — a trend can have
+  more than two points.
+- If the trend has more than one accuracy, characterize it in one clause (e.g.
+  improving, plateaued, oscillating) using only those numbers.
+- If a collapsed class is given, name it explicitly — it is the real reason a
+  passable-looking accuracy still isn't good enough. If none is given, do not
+  mention collapse at all.
 - Output PLAIN PROSE ONLY — no code, JSON, markdown, lists, or preamble.
 - Be factual and concise. No marketing tone.
 
-### EXAMPLE ###
-Input  — Decision: proceed at iteration 2. Accuracy 0.67 vs target 0.60. Proposal: proceed.
-Output — Test accuracy of 0.67 clears the 0.60 target, so the gate proceeds to the \
-explanation stage. The evaluator agreed; though the neutral class remains weakest, the \
-iteration budget favours moving forward.
+### EXAMPLE 1 ###
+Input  — Decision: proceed at iteration 3. Accuracy 0.67 vs target 0.60. Trend: 0.41 -> 0.54 -> 0.67.
+Proposal: proceed. Collapsed class: none.
+Output — Test accuracy of 0.67 clears the 0.60 target, up from 0.54 last iteration and
+continuing a steady climb from 0.41, so the gate proceeds to the explanation stage. The
+evaluator agreed, and the improving trend supports moving forward now rather than spending
+more of the iteration budget.
+
+### EXAMPLE 2 ###
+Input  — Decision: retune at iteration 3. Accuracy 0.65 vs target 0.60. Trend: 0.61 -> 0.63 -> 0.65.
+Proposal: retune. Collapsed class: up (recall 0.03, floor 0.05).
+Output — Accuracy of 0.65 clears the 0.60 target on paper, but the up class has collapsed to
+0.03 recall, below the 0.05 floor — the model is winning by defaulting other classes to
+neutral rather than genuinely predicting up-moves. The gate correctly retunes despite the
+steady 0.61-0.65 climb, since a collapsed class makes this a degenerate pass.
 """
 
 
@@ -401,7 +431,21 @@ def _llama_rationale(state: ManagerState) -> str:
 
     from huggingface_hub import InferenceClient
 
-    proposal = state["evaluation_report"].get("proposal", {})
+    report = state["evaluation_report"]
+    proposal = report.get("proposal", {})
+
+    # Trend: the full accuracy history including this iteration (see `decide`,
+    # which appends before `rationale` runs) — lets the LLM characterize the
+    # trajectory instead of judging a single number in isolation.
+    history = state.get("accuracy_history", [])
+    trend = " -> ".join(f"{a:.2f}" for a in history) if history else f"{state['accuracy']:.2f}"
+
+    # Collapse: same floor and detection the gate itself used (`decide`), so the
+    # rationale can never flag a collapse the gate didn't also see.
+    detail = _collapse_detail(report, state.get("min_class_accuracy", 0.05))
+    collapse_str = (f"{detail[0]} (recall {detail[1]:.2f}, floor "
+                    f"{state.get('min_class_accuracy', 0.05):.2f})") if detail else "none"
+
     # Any HF failure (rate limit, gated-model 403, timeout, malformed response)
     # must not abort the graph — the gate's decision still needs to be written.
     # Fall back to the deterministic note, mirroring the no-token branch above.
@@ -413,9 +457,10 @@ def _llama_rationale(state: ManagerState) -> str:
                 {"role": "user", "content": (
                     f"Decision: {state['final_action']} at iteration {state['iteration']}. "
                     f"Test accuracy {state['accuracy']:.2f} vs target "
-                    f"{state['target_accuracy']:.2f}. Evaluator proposal: {proposal}.")},
+                    f"{state['target_accuracy']:.2f}. Trend: {trend}. "
+                    f"Proposal: {proposal}. Collapsed class: {collapse_str}.")},
             ],
-            max_tokens=160,
+            max_tokens=220,
             temperature=0.3,
         )
         return resp.choices[0].message.content.strip()
