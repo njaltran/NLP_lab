@@ -4,7 +4,7 @@ Reads processed_data.csv and optionally retune_request.json, generates the
 classifier script classifier.py (ProsusAI/finbert), runs it to generate
 predictions_test.csv, and outputs both.
 
-See docs/data_contracts.md (Handoff 2).
+Contract: predictions_test.csv (Handoff 2); column spec in agents/contracts.py.
 """
 
 import ast
@@ -14,7 +14,6 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
-from typing import TypedDict
 
 # Allow running as a package or direct script
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

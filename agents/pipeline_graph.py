@@ -101,7 +101,7 @@ def clean_outputs() -> None:
         shutil.rmtree(directory, ignore_errors=True)
 
 
-class PipelineState(TypedDict, total=False):
+class LoopState(TypedDict, total=False):
     """Control state carried around the unified graph. Deliberately small — the
     per-row data lives in the contract CSV/JSON files the agents read and write,
     not in here. Only what the *graph* needs to route and cycle lives in state."""
@@ -155,9 +155,9 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
     """
     from langgraph.graph import StateGraph, START, END
 
-    def process(state: PipelineState) -> dict:
+    def process(state: LoopState) -> dict:
         """Aurora: build the labelled dataset. Runs once, before the loop.
-        Cleanup runs only after she succeeds (see docs/retune_loop.md)."""
+        Cleanup runs only after she succeeds."""
         extra = {"data_dir": data_dir} if data_dir else {}
         if dataset_end:
             extra["dataset_end"] = dataset_end
@@ -165,7 +165,7 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
         clean_outputs()
         return {"processed_data_path": processed}
 
-    def classify(state: PipelineState) -> dict:
+    def classify(state: LoopState) -> dict:
         """Nadi: (re)generate and run the classifier. On cycle passes,
         `retune_request_path` points at the Manager's latest retune request so the
         params escalate; on the first pass it is None (fresh classifier)."""
@@ -175,7 +175,7 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
                         retune_request=state.get("retune_request_path"), **extra)
         return {}
 
-    def evaluate(state: PipelineState) -> dict:
+    def evaluate(state: LoopState) -> dict:
         """Sabina: score the predictions on the VAL split — retune decisions must
         never see the test rows, or the loop tunes against (overfits) the final
         measurement. Also snapshots this pass's artifacts into BEST_DIR whenever
@@ -195,7 +195,7 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
             out["best_score"] = score
         return out
 
-    def gate(state: PipelineState) -> dict:
+    def gate(state: LoopState) -> dict:
         """Manager gate. Invoking it applies the accuracy gate (with convergence +
         adaptive retune) and, as a side effect, writes EITHER retune_request.json
         (retune) OR sample_for_explanation.csv (proceed). We surface its verdict so
@@ -207,7 +207,7 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
             out["retune_request_path"] = RETUNE  # fed back into `classify` on the cycle
         return out
 
-    def select_best(state: PipelineState) -> dict:
+    def select_best(state: LoopState) -> dict:
         """The gate proceeded with the LAST iteration's artifacts, which are not
         necessarily the best ones (accuracy can regress across retunes). If an
         earlier pass scored higher, restore its snapshot over the canonical paths
@@ -224,7 +224,7 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
               f"iteration's artifacts (score {best:.2f}) for explanation + finals")
         return {}
 
-    def evaluate_test(state: PipelineState) -> dict:
+    def evaluate_test(state: LoopState) -> dict:
         """Sabina one last time, now on the TEST split: the loop tuned and
         selected on val, so the test rows are scored exactly once, here — an
         honest held-out number. Overwrites EVAL, which finalize reads for
@@ -232,23 +232,23 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
         agents.sabina.run(predictions=PREDS, classifier_code=CODE, eval_split="test")
         return {}
 
-    def explain(state: PipelineState) -> dict:
+    def explain(state: LoopState) -> dict:
         """Freddi: justify each sampled prediction into explanations.csv."""
         agents.freddi.run(sample_for_explanation=SAMPLE, output=EXPL)
         return {}
 
-    def finalize(state: PipelineState) -> dict:
+    def finalize(state: LoopState) -> dict:
         """Manager again, now with explanations present → writes final_results.csv
         and final_report.json. Not a new iteration (the gate already proceeded)."""
         st = agents.manager.run(evaluation_report=EVAL, explanations=EXPL)
         return {"iteration": st["iteration"]}
 
-    def route(state: PipelineState) -> str:
+    def route(state: LoopState) -> str:
         """The cycle's branch point: loop back to `classify` on retune, else move
         on to the explanation stage."""
         return "retune" if state["final_action"] == "retune" else "proceed"
 
-    b = StateGraph(PipelineState)
+    b = StateGraph(LoopState)
     for name, fn in [("process", process), ("classify", classify), ("evaluate", evaluate),
                      ("gate", gate), ("select_best", select_best),
                      ("evaluate_test", evaluate_test), ("explain", explain),

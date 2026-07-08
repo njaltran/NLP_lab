@@ -14,8 +14,8 @@ Run:
     uv run agents/finetune_finbert.py --data data/processed_data.csv
     uv run agents/finetune_finbert.py --data data/processed_data.csv --limit 50   # quick smoke test
 
-Design notes: docs/study_guide.md (Classifier section) explains why we expect a
-weak result here — the signal in one headline is thin.
+Design note: we expect a weak result here — the signal in one headline is thin.
+See the README (Results) for measured accuracy and baselines.
 """
 
 import argparse

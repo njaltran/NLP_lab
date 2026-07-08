@@ -6,7 +6,7 @@ LangChain chain (`prompt | ChatOllama | StrOutputParser`) — the pattern from t
 RAG exercise (notebook 7). The whole thing is wrapped in the shared `Agent`
 interface (`agents/base.py`) so the Manager can trigger it with `.run()`.
 
-Contract: docs/data_contracts.md, Handoffs 4 (input) and 5 (output).
+Contract: reads sample_for_explanation.csv (Handoff 4), writes explanations.csv (Handoff 5).
 
 Input columns  : article_id, article_title, predicted_label, actual_label,
                  confidence, prob_up, prob_down, prob_neutral

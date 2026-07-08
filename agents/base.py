@@ -11,7 +11,7 @@ checkpointer, the thread id, and invoking. Each subclass fills two holes:
 `build_graph()` (its graph shape) and `run()` (its file I/O + state shaping).
 
 NOTE: this is shared across all five agents. Changing it needs the other owners'
-sign-off (Golden rule 2). It is a code convention, not a data-contract change —
+sign-off. It is a code convention, not a data-contract change —
 no handoff file formats live here.
 """
 
@@ -33,11 +33,11 @@ class Agent(ABC):
         self._config = {"configurable": {"thread_id": thread_id}}
 
     @abstractmethod
-    def build_graph(self, checkpointer): #what do the agents do?
+    def build_graph(self, checkpointer):
         """Return the compiled LangGraph for this agent."""
 
     @abstractmethod
-    def run(self, **inputs) -> dict: #how do the agents run?
+    def run(self, **inputs) -> dict:
         """Read contract input file(s), invoke the graph, write contract
         output file(s), and return the final state dict."""
 

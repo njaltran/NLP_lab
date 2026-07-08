@@ -1,8 +1,8 @@
 """Shared data-contract helpers for the agent handoff files.
 
-The source of truth is docs/data_contracts.md. This module keeps the repeated
-column lists, label validation, and common row shaping behind one interface so
-agent modules do not each reimplement the same contract details.
+This module is the source of truth for the handoff column contracts. It keeps
+the repeated column lists, label validation, and common row shaping behind one
+interface so agent modules do not each reimplement the same contract details.
 """
 
 from __future__ import annotations

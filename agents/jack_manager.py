@@ -5,7 +5,7 @@ deterministic accuracy gate, and (later steps) writes the retune request,
 explanation sample, and final outputs. LLM (Llama via HF) only writes the
 human-readable rationale — the gate itself is pure rules.
 
-See docs/data_contracts.md (Handoffs 3, 3b, 4, 6).
+Contracts: Handoffs 3, 3b, 4, 6 (column specs in agents/contracts.py).
 """
 
 import json

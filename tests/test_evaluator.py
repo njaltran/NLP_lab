@@ -190,7 +190,7 @@ def test_code_notes_flag_class_collapse():
     """A class with near-zero recall must be called out — aggregate accuracy
     alone hides a classifier that predicts one class for everything."""
     class_accuracy = {"up": 0.97, "down": 0.0, "neutral": 0.04}
-    notes = se.review_classifier_code("THRESHOLD = 0.2", class_accuracy)
+    notes = se.review_classifier_metrics("THRESHOLD = 0.2", class_accuracy)
     assert "class collapse" in notes
     assert "down" in notes and "neutral" in notes
 

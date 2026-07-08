@@ -1,24 +1,12 @@
 {
-  "eval_split": "test",
-  "final_accuracy": 0.5,
-  "final_test_accuracy": 0.5,
+  "final_accuracy": 0.35,
   "loop_iterations": 5,
   "class_accuracy": {
-    "up": 0.36,
-    "down": 0.05,
-    "neutral": 0.76
+    "up": 0.78,
+    "down": 0.06,
+    "neutral": 0.25
   },
   "class_support": {
-    "up": 578,
-    "down": 485,
-    "neutral": 1133
-  },
-  "test_class_accuracy": {
-    "up": 0.36,
-    "down": 0.05,
-    "neutral": 0.76
-  },
-  "test_class_support": {
     "up": 578,
     "down": 485,
     "neutral": 1133

@@ -18,7 +18,7 @@ build_report     pure report builder used by the graph and tests
 Usage (standalone test):
     python agents/sabina_evaluator.py
 
-See docs/data_contracts.md, Handoff 3.
+Contract: evaluation_report.json (Handoff 3).
 """
 
 import json
@@ -32,7 +32,6 @@ try:
     from agents.base import Agent
     from agents.contracts import (
         LABELS,
-        PREDICTION_COLUMNS,
         read_prediction_rows,
         validate_prediction_rows,
     )
@@ -40,7 +39,6 @@ except ModuleNotFoundError:
     from base import Agent
     from contracts import (
         LABELS,
-        PREDICTION_COLUMNS,
         read_prediction_rows,
         validate_prediction_rows,
     )
@@ -179,11 +177,6 @@ def _weakest_labels(class_accuracy: dict, class_support: dict | None = None) -> 
         for label_name, score in supported.items()
         if score <= weakest_score + FOCUS_MARGIN
     ]
-
-
-def review_classifier_code(code_text: str, class_accuracy: dict) -> str:
-    """Return concise static observations from the generated classifier.py."""
-    return review_classifier_metrics(code_text, class_accuracy)
 
 
 def review_classifier_metrics(

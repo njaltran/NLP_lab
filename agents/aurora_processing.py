@@ -81,7 +81,7 @@ def _assign_split(df, dataset_end=None):
     `dataset_end` (YYYY-MM-DD) optionally drops later rows *before* splitting —
     e.g. "2019-12-31" keeps the COVID crash out of the test window so the
     held-out accuracy measures the normal regime, not a structural break.
-    See docs/data_contracts.md, Handoff 1."""
+    Output schema: Handoff 1 (processed_data.csv)."""
     if dataset_end:
         before = len(df)
         df = df[pd.to_datetime(df["date"]) <= pd.to_datetime(dataset_end)].reset_index(drop=True)
@@ -177,7 +177,7 @@ def processing_node(state: PipelineState) -> dict:
     # keep a later regime — e.g. COVID — out of the test window).
     df = _assign_split(df, state.get("dataset_end"))
 
-    # 6. Export (Handoff 1 schema from data_contracts.md)
+    # 6. Export (Handoff 1 schema)
     output_cols = [
         "article_id", "date", "ticker", "article_title",
         "price_t", "price_t1", "pct_change", "label", "split",
