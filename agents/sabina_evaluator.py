@@ -1,24 +1,52 @@
-"""Evaluator Agent
-Owner: Sabina Rudolph
+"""Sabina's Evaluator Agent.
 
-Reads the Classifier Agent's `predictions_test.csv` and generated
-`classifier.py`, computes classification metrics deterministically, asks an LLM
-to review the classifier code and metrics, and writes the Manager Agent's input:
-`evaluation_report.json`.
+This agent runs after the Classifier Agent and before the Manager Agent. It does
+not train the model again and it does not create new predictions. Its main task
+is to check the classifier output, calculate evaluation metrics, and write the
+report that is passed to the Manager Agent.
 
-Scoring is split-aware: retune cycles are scored on the `val` rows so the loop
-cannot overfit the `test` rows, which are scored exactly once for the final
-report (`eval_split` parameter, recorded in the report).
+Inputs
+------
+predictions_test.csv
+    The prediction file from the Classifier Agent. It contains the true label,
+    predicted label, confidence score, class probabilities, and split for each
+    row.
+
+classifier.py
+    The generated classifier code. The Evaluator reads this file as text so it
+    can add short notes about the classifier setup, for example the threshold
+    used for prediction.
+
+Output
+------
+evaluation_report.json
+    The report written by the Evaluator Agent. It contains the metrics and my
+    recommendation (`retune` or `proceed`). The Manager Agent uses this report
+    in the next step, but the final pipeline decision is still made there.
+
+The metric calculation and recommendation are rule-based. If the optional LLM is
+enabled, it is only used to make the explanation text clearer. It is not allowed
+to change the metrics, action, focus labels, or suggested parameters.
+
+The Evaluator can score different data splits. During retuning, it should score
+the `val` rows. For the final report, it should score the `test` rows. This
+keeps the test data separate until the final evaluation.
 
 Exports
 -------
-EvaluatorAgent   Agent subclass — callers do EvaluatorAgent().run()
-build_report     pure report builder used by the graph and tests
+EvaluatorAgent
+    Agent class used by the pipeline through `EvaluatorAgent().run()`.
 
-Usage (standalone test):
+build_report
+    Pure report-building function used by the graph and by tests.
+
+Usage
+-----
+Run this file directly for a small standalone test:
+
     python agents/sabina_evaluator.py
 
-See docs/data_contracts.md, Handoff 3.
+See also: docs/data_contracts.md, Handoff 3.
 """
 
 import json
@@ -52,8 +80,8 @@ THRESHOLD_STEP = 0.05
 THRESHOLD_FLOOR = 0.20
 DEFAULT_MAX_LENGTH = 128
 FOCUS_MARGIN = 0.05
-CLASS_COLLAPSE_FLOOR = 0.05   # per-class recall below this = collapse, flagged in code_notes
-# Read once at import time so tests and demos get stable evaluator behavior.
+CLASS_COLLAPSE_FLOOR = 0.05   # per-class recall below this is treated as class collapse
+
 USE_OLLAMA = os.getenv("EVALUATOR_USE_OLLAMA", "false").lower() == "true"
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
 OLLAMA_MODEL = os.getenv("EVALUATOR_OLLAMA_MODEL", "llama3.1")
@@ -66,10 +94,11 @@ PROPOSAL_FIELDS = {
 
 
 class EvaluatorState(TypedDict, total=False):
-    """State passed through the evaluator LangGraph.
+    """State passed through the Evaluator's internal LangGraph.
 
-    The graph starts with file paths, then adds the loaded predictions,
-    classifier source text, and final report before writing JSON to disk.
+    The graph starts with the input file paths. `load_inputs` adds the loaded
+    prediction rows and classifier source text. `evaluate` builds the report.
+    `write_report` saves the report as JSON.
     """
 
     predictions_path: str
@@ -83,23 +112,37 @@ class EvaluatorState(TypedDict, total=False):
 
 
 def _read_predictions(path: str) -> list[dict]:
-    """Read classifier predictions and enforce the exact Handoff 2 columns."""
+    """Read the prediction CSV from the Classifier Agent."""
     return read_prediction_rows(path)
 
 
 def _read_code(path: str) -> str:
-    """Read the generated classifier.py as text for static review."""
+    """Read the generated classifier code as text.
+
+    The Evaluator does not execute the classifier again. It only reads the code
+    so it can add simple notes to the final report.
+    """
     with open(path, encoding="utf-8") as f:
         return f.read()
 
 
 def validate_predictions(rows: list[dict]) -> None:
-    """Check the Handoff 2 fields needed before scoring."""
+    """Check that the prediction rows match the expected input format.
+
+    This checks required columns, valid labels, probability values, confidence,
+    and split. If this validation fails, the evaluation report should not be
+    trusted.
+    """
     validate_prediction_rows(rows)
 
 
 def compute_metrics(rows: list[dict]) -> dict:
-    """Compute overall and per-class classification accuracy/support."""
+    """Calculate the metric section of `evaluation_report.json`.
+
+    The report contains overall accuracy, class accuracy, class support,
+    misclassified count, and the ids of misclassified articles. Class support is
+    included so that a missing class is not confused with model collapse.
+    """
     total = len(rows)
     wrong = [row for row in rows if row["label"] != row["predicted_label"]]
     class_accuracy = {}
@@ -125,14 +168,13 @@ def compute_metrics(rows: list[dict]) -> dict:
 
 
 def _find_assignment(code_text: str, name: str) -> str | None:
-    """Return the right-hand side of a simple `NAME = value` assignment."""
+    """Find the value of a simple `NAME = value` assignment in classifier.py."""
     match = re.search(rf"^\s*{re.escape(name)}\s*=\s*([^\n#]+)", code_text, re.M)
     return match.group(1).strip() if match else None
 
 
 def _warn_unparseable(name: str, value: str, default: float | int) -> None:
-    # A silent default here would make every retune re-propose the same
-    # params, so the stalled loop must be visible in the run output.
+    """Print a warning when a classifier setting cannot be parsed."""
     print(
         f"[sabina] could not parse {name}={value!r} in classifier.py; "
         f"assuming {default}",
@@ -141,7 +183,7 @@ def _warn_unparseable(name: str, value: str, default: float | int) -> None:
 
 
 def _float_assignment(code_text: str, name: str, default: float) -> float:
-    """Read a numeric assignment from classifier.py, falling back if missing."""
+    """Read a numeric setting from classifier.py, or use the default value."""
     value = _find_assignment(code_text, name)
     if value is None:
         return default
@@ -153,7 +195,7 @@ def _float_assignment(code_text: str, name: str, default: float) -> float:
 
 
 def _int_assignment(code_text: str, name: str, default: int) -> int:
-    """Read an integer assignment from classifier.py, falling back if missing."""
+    """Read an integer setting from classifier.py, or use the default value."""
     value = _find_assignment(code_text, name)
     if value is None:
         return default
@@ -165,7 +207,7 @@ def _int_assignment(code_text: str, name: str, default: int) -> int:
 
 
 def _weakest_labels(class_accuracy: dict, class_support: dict | None = None) -> list[str]:
-    """Return labels within FOCUS_MARGIN of the weakest supported accuracy."""
+    """Return the labels with the weakest class accuracy."""
     supported = {
         label_name: score
         for label_name, score in class_accuracy.items()
@@ -182,7 +224,7 @@ def _weakest_labels(class_accuracy: dict, class_support: dict | None = None) -> 
 
 
 def review_classifier_code(code_text: str, class_accuracy: dict) -> str:
-    """Return concise static observations from the generated classifier.py."""
+    """Keep the older test interface working when only class accuracy is passed."""
     return review_classifier_metrics(code_text, class_accuracy)
 
 
@@ -191,20 +233,17 @@ def review_classifier_metrics(
     class_accuracy: dict,
     class_support: dict | None = None,
 ) -> str:
-    """Return concise static observations from metrics and classifier.py.
+    """Create short notes about the classifier and the metric results.
 
-    Zero-support labels keep class_accuracy=0.0 for backwards compatibility, but
-    they are not evidence of class collapse. `class_support` disambiguates a
-    missing label from a real near-zero recall.
+    This is not a full code review. It only checks simple points that are useful
+    for the Manager Agent, such as the threshold, weak labels, missing classes,
+    and possible class collapse.
     """
     notes = []
     threshold = _find_assignment(code_text, "THRESHOLD")
     if threshold is not None:
         notes.append(f"threshold hardcoded at {threshold} in classifier.py")
 
-    # A class with (near-)zero recall means the classifier has collapsed onto
-    # the other classes — the aggregate accuracy then mostly reflects the label
-    # mix, not real signal. Say so explicitly; it changes how a retune should go.
     collapsed = [
         name for name, score in class_accuracy.items()
         if (class_support is None or class_support.get(name, 0) > 0)
@@ -234,7 +273,7 @@ def review_classifier_metrics(
 
 
 def _suggest_retune_params(code_text: str) -> dict:
-    """Suggest the next deterministic retune step without asking the LLM."""
+    """Suggest the next retune parameters using fixed rules."""
     current_threshold = _float_assignment(
         code_text, "THRESHOLD", DEFAULT_RETUNE_THRESHOLD
     )
@@ -247,7 +286,12 @@ def _suggest_retune_params(code_text: str) -> dict:
 
 
 def make_base_proposal(metrics: dict, code_text: str, code_notes: str) -> dict:
-    """Create the contract proposal with deterministic action and params."""
+    """Create the Evaluator's rule-based recommendation.
+
+    If accuracy is below the target, the recommendation is `retune`. If the
+    target is reached, the recommendation is `proceed`. The optional LLM is not
+    allowed to change this action.
+    """
     focus_labels = _weakest_labels(
         metrics["class_accuracy"],
         metrics.get("class_support"),
@@ -282,7 +326,11 @@ def make_base_proposal(metrics: dict, code_text: str, code_notes: str) -> dict:
 
 
 def validate_proposal(proposal: dict, metrics: dict) -> dict:
-    """Validate the proposal before it can enter evaluation_report.json."""
+    """Validate the recommendation before it is written into the report.
+
+    This makes sure that the handoff to the Manager Agent has the expected
+    fields and that the recommendation follows the fixed threshold rule.
+    """
     if not isinstance(proposal, dict):
         raise ValueError("LLM proposal must be a JSON object")
 
@@ -347,7 +395,7 @@ def _extract_json_object(text: str) -> dict:
 
 
 def _prompt_metrics(metrics: dict) -> dict:
-    """Small metrics view for the LLM; opaque row ids stay out of the prompt."""
+    """Select the metric fields that are useful for optional LLM wording."""
     return {
         "accuracy": metrics["accuracy"],
         "below_threshold": metrics["below_threshold"],
@@ -361,7 +409,11 @@ def _misclassified_sample(
     rows: list[dict],
     limit: int = MISCLASSIFIED_SAMPLE_SIZE,
 ) -> list[dict]:
-    """Small failure sample for LLM pattern analysis; row ids stay out."""
+    """Collect a small sample of wrong predictions for the optional LLM.
+
+    Article ids are left out because the LLM only needs the failure pattern, not
+    the full list of report identifiers.
+    """
     sample = []
     for row in rows:
         if row["label"] == row["predicted_label"]:
@@ -381,7 +433,7 @@ def _misclassified_sample(
 
 
 def _classifier_summary_for_prompt(code_text: str) -> dict:
-    """Summarise source signals instead of sending the whole generated file."""
+    """Summarise the classifier code instead of sending the full source text."""
     model = _find_assignment(code_text, "MODEL")
     return {
         "threshold": _find_assignment(code_text, "THRESHOLD"),
@@ -399,7 +451,7 @@ def _build_llm_prompt(
     base_proposal: dict,
     failure_sample: list[dict],
 ) -> str:
-    """Prompt the LLM for judgement text only; control fields are deterministic."""
+    """Build the optional LLM prompt for `reason` and `code_notes` only."""
     payload = {
         "eval_split": metrics.get("eval_split", "test"),
         "metrics": _prompt_metrics(metrics),
@@ -431,7 +483,7 @@ def _build_llm_prompt(
 
 
 def _validate_llm_review(review: dict) -> dict:
-    """Accept only the fields the LLM is allowed to write."""
+    """Accept only the two text fields that the LLM is allowed to write."""
     if not isinstance(review, dict):
         raise ValueError("LLM review must be a JSON object")
     if set(review) != {"reason", "code_notes"}:
@@ -447,7 +499,7 @@ def _validate_llm_review(review: dict) -> dict:
 
 
 def _ollama_generate(prompt: str) -> str:
-    """Call local Ollama when explicitly enabled; no API key is needed."""
+    """Call local Ollama when it is explicitly enabled."""
     body = json.dumps({
         "model": OLLAMA_MODEL,
         "prompt": prompt,
@@ -472,7 +524,12 @@ def apply_llm_review(
     failure_sample: list[dict],
     llm_fn: Callable[[str], str] | None = None,
 ) -> dict:
-    """Let an LLM improve reason/code_notes without changing control fields."""
+    """Let the optional LLM improve the explanation text.
+
+    The LLM is not allowed to change the recommendation or the metrics. If the
+    LLM is disabled, unavailable, or returns invalid JSON, the Evaluator keeps
+    the rule-based proposal so the pipeline can still continue.
+    """
     if llm_fn is None and not USE_OLLAMA:
         return base_proposal
 
@@ -498,12 +555,10 @@ def apply_llm_review(
 
 
 def _select_split(rows: list[dict], eval_split: str) -> list[dict]:
-    """Return only the rows belonging to `eval_split` ("val" or "test").
+    """Return only the rows from the requested evaluation split.
 
-    The retune loop scores itself on the val rows so the test rows stay unseen
-    until the final report — repeatedly tuning against the test set would
-    overfit it and inflate the final accuracy. Missing rows are a hard error:
-    silently scoring the wrong split would defeat the whole point.
+    Retune cycles should use `val`, while the final report should use `test`.
+    This keeps the test split from being reused during tuning.
     """
     if eval_split not in ("val", "test"):
         raise ValueError(f"eval_split must be 'val' or 'test', got {eval_split!r}")
@@ -522,12 +577,23 @@ def build_report(
     llm_fn: Callable[[str], str] | None = None,
     eval_split: str = "test",
 ) -> dict:
-    """Build the complete Handoff 3 `evaluation_report.json` object, scored on
-    the `eval_split` rows only ("val" during retune cycles, "test" for the
-    final report).
+    """Build the complete Evaluator report for the Manager Agent.
 
-    Metrics, action, focus labels, and suggested params are deterministic.
-    The optional LLM can only improve `reason` and `code_notes`.
+    Parameters
+    ----------
+    rows:
+        Prediction rows from the Classifier Agent.
+    code_text:
+        Generated classifier source code.
+    llm_fn:
+        Optional function used for LLM review in tests or demos.
+    eval_split:
+        Split to score: `val` during retuning and `test` for final evaluation.
+
+    Returns
+    -------
+    dict
+        Full content of `evaluation_report.json`.
     """
     rows = _select_split(rows, eval_split)
     validate_predictions(rows)
@@ -553,14 +619,14 @@ def build_report(
 
 
 def _write_json(path: str, obj: dict) -> None:
-    """Write UTF-8 JSON and create the output folder if needed."""
+    """Write a JSON file and create the output folder if needed."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(obj, f, indent=2)
 
 
 def load_inputs(state: EvaluatorState) -> dict:
-    """LangGraph node — load classifier predictions and generated code."""
+    """LangGraph node 1: load the prediction CSV and classifier code."""
     return {
         "predictions": _read_predictions(state["predictions_path"]),
         "code_text": _read_code(state["classifier_code_path"]),
@@ -568,13 +634,13 @@ def load_inputs(state: EvaluatorState) -> dict:
 
 
 def evaluate(state: EvaluatorState) -> dict:
-    """LangGraph node — compute metrics and build the evaluator report."""
+    """LangGraph node 2: validate the input and build the report."""
     return {"report": build_report(state["predictions"], state["code_text"],
                                    eval_split=state["eval_split"])}
 
 
 def write_report(state: EvaluatorState) -> dict:
-    """LangGraph node — write `evaluation_report.json` for the Manager Agent."""
+    """LangGraph node 3: write `evaluation_report.json` for the Manager."""
     output_path = state.get("output_path") or os.path.join(
         OUTPUT_DIR,
         "evaluation_report.json",
@@ -584,7 +650,12 @@ def write_report(state: EvaluatorState) -> dict:
 
 
 def build_graph(checkpointer):
-    """Compile the evaluator's three-step LangGraph: load, evaluate, write."""
+    """Compile the Evaluator Agent's three-step LangGraph.
+
+    The Evaluator itself is a simple linear graph: load inputs, evaluate, and
+    write the report. The larger retuning loop is handled by the full pipeline
+    and the Manager Agent.
+    """
     from langgraph.graph import StateGraph, START, END
 
     builder = StateGraph(EvaluatorState)
@@ -599,7 +670,7 @@ def build_graph(checkpointer):
 
 
 class EvaluatorAgent(Agent):
-    """Evaluator behind the shared `.run()` interface."""
+    """Sabina's Evaluator Agent using the shared `.run()` interface."""
 
     def __init__(self, *, output_dir=OUTPUT_DIR, checkpointer=None, thread_id="evaluator"):
         self._output_dir = output_dir
@@ -609,9 +680,22 @@ class EvaluatorAgent(Agent):
         return build_graph(checkpointer)
 
     def run(self, predictions: str, classifier_code: str, eval_split: str = "test") -> dict:
-        """`eval_split` picks which held-out rows to score: "val" during retune
-        cycles (so the loop can't overfit the test set), "test" for the final
-        report only."""
+        """Run the Evaluator Agent.
+
+        Parameters
+        ----------
+        predictions:
+            Path to the Classifier Agent's prediction CSV.
+        classifier_code:
+            Path to the generated `classifier.py`.
+        eval_split:
+            Split to score: `val` for retuning or `test` for final evaluation.
+
+        Returns
+        -------
+        dict
+            Final LangGraph state, including the path to `evaluation_report.json`.
+        """
         output_path = os.path.join(self._output_dir, "evaluation_report.json")
         return self._invoke({
             "predictions_path": predictions,
