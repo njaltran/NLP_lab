@@ -29,6 +29,57 @@ except ModuleNotFoundError:
 
 OUTPUT_DIR = "outputs"
 
+# --- Per-head fine-tuning hyperparameter schedule (ADR 0001) -------------------
+# Nadi, not Manager, picks these now: given one directional head's own prior
+# retune attempts, choose the next learning rate and focus weight. Values
+# mirror the schedule this pipeline already validated for a single 3-class
+# head — halving on regression, stepping the focus weight up otherwise.
+TRAINING_LR_START = 5e-6
+TRAINING_LR_FLOOR = 2e-6
+TRAINING_LR_BACKOFF = 0.5
+TRAINING_MULTIPLIER_STEP = 0.25
+TRAINING_MULTIPLIER_MIN = 1.0
+TRAINING_MULTIPLIER_MAX = 2.0
+
+
+def next_head_training_params(history: list[dict], *, collapsed: bool) -> dict:
+    """Pick the next learning_rate/focus_weight_multiplier for ONE directional
+    head, from that head's own prior attempts only — the other head's history
+    never enters this, since each head is tuned independently (ADR 0002).
+
+    First attempt: start at TRAINING_LR_START; the focus weight starts higher
+    when this retune is fixing a collapse, since the head needs a stronger
+    push toward its own class right away.
+
+    Later attempts: if the last attempt for this head regressed, back the
+    focus weight off one step and halve the learning rate (floored);
+    otherwise hold the learning rate and push the focus weight one step
+    further. Only the most recent attempt matters — the schedule reacts to
+    what just happened, not the full history.
+    """
+    if not history:
+        return {
+            "learning_rate": TRAINING_LR_START,
+            "focus_weight_multiplier": 1.5 if collapsed else 1.25,
+        }
+    last = history[-1]
+    if last["regressed"]:
+        return {
+            "learning_rate": max(TRAINING_LR_FLOOR, last["learning_rate"] * TRAINING_LR_BACKOFF),
+            "focus_weight_multiplier": max(
+                TRAINING_MULTIPLIER_MIN,
+                last["focus_weight_multiplier"] - TRAINING_MULTIPLIER_STEP,
+            ),
+        }
+    return {
+        "learning_rate": last["learning_rate"],
+        "focus_weight_multiplier": min(
+            TRAINING_MULTIPLIER_MAX,
+            last["focus_weight_multiplier"] + TRAINING_MULTIPLIER_STEP,
+        ),
+    }
+
+
 # --- Optional "agentic" code generation via a local LLM (Ollama) ---------------
 # By default the classifier is generated from a fixed template (fully
 # deterministic). When CLASSIFIER_USE_OLLAMA=true, we also ask a local LLM to
