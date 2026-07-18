@@ -7,10 +7,13 @@ derivation). Tests that actually train are marked `slow` and skipped by
 default.
 """
 
+import json
+
 import pandas as pd
 import pytest
+from transformers import AutoConfig
 
-from agents.finbert_finetuner import rows_for_head
+from agents.finbert_finetuner import rows_for_head, train_finbert
 
 PROCESSED_DATA = "mock_data/processed_data.csv"
 
@@ -50,3 +53,34 @@ def test_invalid_head_raises():
 
     with pytest.raises(ValueError, match="head must be 'up' or 'down'"):
         rows_for_head(frame, "neutral")
+
+
+@pytest.mark.slow
+def test_train_finbert_publishes_a_binary_head_checkpoint(tmp_path):
+    """End-to-end smoke: a tiny training run for the up-head publishes a
+    genuine 2-class checkpoint (up vs neutral) and a matching report."""
+    out_dir = tmp_path / "up"
+
+    result = train_finbert(
+        data_path=PROCESSED_DATA,
+        out_dir=str(out_dir),
+        head="up",
+        learning_rate=5e-6,
+        focus_weight_multiplier=1.0,
+        epochs=1,
+        limit=8,
+    )
+
+    assert result["model_dir"] == str(out_dir)
+    report = result["report"]
+    assert report["head"] == "up"
+    assert set(report["val_class_accuracy"]) == {"up", "neutral"}
+    assert 0.0 <= report["best_val_accuracy"] <= 1.0
+
+    config = AutoConfig.from_pretrained(out_dir)
+    id2label = {int(k): v.lower() for k, v in config.id2label.items()}
+    assert id2label == {0: "neutral", 1: "up"}
+
+    report_path = out_dir / "training_report.json"
+    assert report_path.exists()
+    assert json.loads(report_path.read_text())["head"] == "up"
