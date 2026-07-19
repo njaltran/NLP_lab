@@ -25,9 +25,6 @@ def main():
     p.add_argument("--sample-size", type=int, default=300, help="rows sampled for explanation")
     p.add_argument("--no-ollama", action="store_true", help="force Freddi's offline fallback")
     p.add_argument("--data-dir", default=None, help="override dir holding fnspid_raw.csv")
-    p.add_argument("--model-dir", default=None,
-                   help="fine-tuned weights folder for Nadi (e.g. outputs/finbert_finetuned); "
-                        "omitted = pretrained FinBERT")
     p.add_argument("--dataset-end", default=None, metavar="YYYY-MM-DD",
                    help="drop rows after this date before splitting (e.g. 2019-12-31 "
                         "keeps the COVID regime out of the test window, matching the "
@@ -39,7 +36,7 @@ def main():
                 max_iterations=args.max_iterations, patience=args.patience,
                 min_delta=args.min_delta, sample_size=args.sample_size,
                 use_ollama=not args.no_ollama, data_dir=args.data_dir,
-                model_dir=args.model_dir, dataset_end=args.dataset_end)
+                dataset_end=args.dataset_end)
     print(f"\n[main] done -- {final['final_action']} at iteration "
           f"{final['iteration']}. Outputs in {OUT}/")
 

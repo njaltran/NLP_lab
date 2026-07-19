@@ -39,12 +39,9 @@ class FakeNadi:
     place and counts how many times it ran (so we can prove the graph cycled)."""
     def __init__(self):
         self.calls = 0
-        self.model_dir = None
 
-    def run(self, *, processed_data, classifier_code, predictions, retune_request=None,
-            model_dir=None):
+    def run(self, *, processed_data, classifier_code, predictions, retune_request=None):
         self.calls += 1
-        self.model_dir = model_dir
         Path(predictions).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(MOCK_PRED, predictions)
         Path(classifier_code).write_text("THRESHOLD = 0.5\n")  # readable by Sabina/Manager
@@ -86,12 +83,18 @@ class FakeSabina:
 
 class MarkedNadi(FakeNadi):
     """FakeNadi that also stamps every predictions file with the pass number,
-    so the test can tell WHICH iteration's artifacts survived to the end."""
+    so the test can tell WHICH iteration's artifacts survived to the end. Also
+    stamps fake up/down head checkpoints (a marker file each) so the same can
+    be verified for the head-checkpoint best/restore snapshot."""
     def run(self, **kwargs):
         out = super().run(**kwargs)
         df = pd.read_csv(kwargs["predictions"])
         df["fake_pass"] = self.calls
         df.to_csv(kwargs["predictions"], index=False)
+        for head in ("up", "down"):
+            head_dir = Path("outputs/finbert_finetuned") / head
+            head_dir.mkdir(parents=True, exist_ok=True)
+            (head_dir / "marker.txt").write_text(str(self.calls))
         return out
 
 
@@ -139,6 +142,14 @@ def test_best_iteration_restored_when_accuracy_regresses(tmp_path, monkeypatch):
 
     # The explanation sample was redrawn from the restored predictions.
     assert (tmp_path / "outputs" / "sample_for_explanation.csv").exists()
+
+    # The head checkpoints restored are the BEST pass's too, not the last
+    # pass's -- each head is overwritten in place every retrain (ADR 0002),
+    # so without evaluate()/select_best() copying them out, this would read
+    # pass 6's (the last, regressed pass) marker instead.
+    for head in ("up", "down"):
+        marker = tmp_path / "outputs" / "finbert_finetuned" / head / "marker.txt"
+        assert marker.read_text() == "2", f"{head}-head checkpoint should be from the best pass"
 
 
 def test_clean_outputs_removes_stale_loop_artifacts(tmp_path, monkeypatch):
@@ -214,18 +225,33 @@ def test_graph_cycles_then_finalizes(tmp_path, monkeypatch):
     req = json.loads((tmp_path / "outputs" / "retune_request.json").read_text())
     assert req["heads_to_retrain"] == ["down"]
 
-    # Default build never asks Nadi for fine-tuned weights.
-    assert nadi.model_dir is None
-
 
 @needs_langgraph
-def test_model_dir_reaches_nadi(tmp_path, monkeypatch):
-    """`model_dir` set on build_pipeline must reach Nadi's run() so the loop can
-    opt in to the fine-tuned weights; it stays off unless explicitly passed."""
+def test_pipeline_fails_loudly_when_cap_hit_while_collapsed(tmp_path, monkeypatch):
+    """ADR 0004: if the iteration cap is hit while a class is still collapsed,
+    the whole unified pipeline must abort (RuntimeError) rather than finalize a
+    collapsed model -- no final_results.csv/final_report.json get written."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "outputs").mkdir()
 
-    nadi = FakeNadi()
-    _run_pipeline(nadi, FakeSabina(), model_dir="outputs/finbert_finetuned")
+    class CollapsedSabina(FakeSabina):
+        """Always reports a collapsed `up` class, never improving."""
+        def run(self, *, predictions, classifier_code, eval_split="test"):
+            self.eval_splits.append(eval_split)
+            self.calls += 1
+            report = {
+                "accuracy": 0.65,
+                "below_threshold": False,
+                "class_accuracy": {"up": 0.0, "down": 0.40, "neutral": 0.95},
+                "misclassified_ids": [],
+                "proposal": {"recommended_action": "proceed"},
+            }
+            os.makedirs("outputs", exist_ok=True)
+            Path("outputs/evaluation_report.json").write_text(json.dumps(report))
+            return {"output_path": "outputs/evaluation_report.json"}
 
-    assert nadi.model_dir == "outputs/finbert_finetuned"
+    with pytest.raises(RuntimeError, match="collapsed"):
+        _run_pipeline(FakeNadi(), CollapsedSabina(), max_iterations=2)
+
+    for name in ("final_results.csv", "final_report.json", "sample_for_explanation.csv"):
+        assert not (tmp_path / "outputs" / name).exists(), f"{name} should not have been written"
