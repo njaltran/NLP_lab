@@ -5,12 +5,22 @@ focus weight. It has no notion of the OTHER head — each head's schedule is
 independent (ADR 0002 decision to split the heads applies to tuning too).
 """
 
+import json
+import os
+
+import pytest
+
 from agents.nadi_classifier import (
     TRAINING_LR_FLOOR,
     TRAINING_LR_START,
     TRAINING_MULTIPLIER_MAX,
+    ClassifierAgent,
+    _heads_needing_training,
+    fine_tune,
     next_head_training_params,
 )
+
+PROCESSED_DATA = "mock_data/processed_data.csv"
 
 
 def test_first_attempt_starts_at_the_base_learning_rate():
@@ -75,3 +85,121 @@ def test_only_the_most_recent_attempt_matters():
 
     assert params["learning_rate"] == TRAINING_LR_START * 0.5
     assert params["focus_weight_multiplier"] == 1.25
+
+
+# --- Which heads train this pass -----------------------------------------------
+
+def test_neither_head_trained_yet_trains_both_regardless_of_request():
+    """Iteration 0 has no checkpoints at all — the baseline pass trains both
+    heads even if Manager only flagged one (there's nothing to classify with
+    otherwise)."""
+    assert _heads_needing_training(requested=["up"], already_trained=set()) == {"up", "down"}
+    assert _heads_needing_training(requested=[], already_trained=set()) == {"up", "down"}
+
+
+def test_once_both_trained_only_the_flagged_head_retrains():
+    already = {"up", "down"}
+
+    assert _heads_needing_training(requested=["down"], already_trained=already) == {"down"}
+    assert _heads_needing_training(requested=[], already_trained=already) == set()
+
+
+# --- fine_tune node (integration; trains real tiny checkpoints) ---------------
+#
+# train_finbert's val split needs at least one row of a head's own class AND
+# one neutral row to be meaningful (see agents/finbert_finetuner.py). The
+# shared mock_data/processed_data.csv's 2-row val split is entirely `up`, so
+# the down-head's filtered val split is empty there. Rather than resize a
+# fixture other tests depend on, these tests use their own small dataset with
+# a val split that covers both heads.
+
+_HEAD_TEST_DATA_HEADER = "article_id,date,ticker,article_title,price_t,price_t1,pct_change,label,split\n"
+_HEAD_TEST_DATA_ROWS = [
+    ("t1", "2021-01-01", "AAPL", "headline one", 100, 103, 3.0, "up", "train"),
+    ("t2", "2021-01-02", "AAPL", "headline two", 100, 97, -3.0, "down", "train"),
+    ("t3", "2021-01-03", "AAPL", "headline three", 100, 100, 0.0, "neutral", "train"),
+    ("t4", "2021-01-04", "AAPL", "headline four", 100, 104, 4.0, "up", "train"),
+    ("t5", "2021-01-05", "AAPL", "headline five", 100, 96, -4.0, "down", "train"),
+    ("t6", "2021-01-06", "AAPL", "headline six", 100, 100, 0.0, "neutral", "train"),
+    ("t7", "2021-01-07", "AAPL", "headline seven", 100, 102, 2.0, "up", "val"),
+    ("t8", "2021-01-08", "AAPL", "headline eight", 100, 98, -2.0, "down", "val"),
+    ("t9", "2021-01-09", "AAPL", "headline nine", 100, 100, 0.0, "neutral", "val"),
+]
+
+
+@pytest.fixture
+def two_head_data(tmp_path):
+    path = tmp_path / "processed_data.csv"
+    lines = [_HEAD_TEST_DATA_HEADER]
+    lines += [",".join(str(v) for v in row) + "\n" for row in _HEAD_TEST_DATA_ROWS]
+    path.write_text("".join(lines))
+    return str(path)
+
+
+@pytest.mark.slow
+def test_fine_tune_bootstrap_trains_both_heads_and_records_history(tmp_path, two_head_data):
+    state = {
+        "processed_data_path": two_head_data,
+        "finetuned_base_dir": str(tmp_path / "finbert_finetuned"),
+        "heads_to_retrain": [],
+        "collapsed_heads": [],
+        "up_model_dir": None,
+        "down_model_dir": None,
+    }
+
+    out = fine_tune(state)
+
+    assert os.path.isdir(out["up_model_dir"])
+    assert os.path.isdir(out["down_model_dir"])
+    assert len(out["up_training_history"]) == 1
+    assert len(out["down_training_history"]) == 1
+    assert out["up_training_history"][0]["learning_rate"] == TRAINING_LR_START
+    assert "regressed" in out["up_training_history"][0]
+
+
+@pytest.mark.slow
+def test_fine_tune_only_retrains_the_flagged_head(tmp_path, two_head_data):
+    base = str(tmp_path / "finbert_finetuned")
+    bootstrap = fine_tune({
+        "processed_data_path": two_head_data, "finetuned_base_dir": base,
+        "heads_to_retrain": [], "collapsed_heads": [],
+        "up_model_dir": None, "down_model_dir": None,
+    })
+    down_mtime_before = os.path.getmtime(
+        os.path.join(bootstrap["down_model_dir"], "training_report.json"))
+
+    second = fine_tune({
+        "processed_data_path": two_head_data, "finetuned_base_dir": base,
+        "heads_to_retrain": ["up"], "collapsed_heads": [],
+        "up_model_dir": bootstrap["up_model_dir"],
+        "down_model_dir": bootstrap["down_model_dir"],
+        "up_training_history": bootstrap["up_training_history"],
+        "down_training_history": bootstrap["down_training_history"],
+    })
+
+    assert "up_training_history" in second
+    assert "down_training_history" not in second
+    assert "down_model_dir" not in second
+    down_mtime_after = os.path.getmtime(
+        os.path.join(bootstrap["down_model_dir"], "training_report.json"))
+    assert down_mtime_after == down_mtime_before  # untouched this pass
+
+
+@pytest.mark.slow
+def test_classifier_agent_run_fine_tunes_when_flagged(tmp_path, two_head_data):
+    """End-to-end: ClassifierAgent.run() with heads_to_retrain in the retune
+    request trains checkpoints before generating/running the classifier."""
+    retune_path = tmp_path / "retune_request.json"
+    retune_path.write_text(json.dumps({"iteration": 1, "heads_to_retrain": ["up", "down"]}))
+
+    agent = ClassifierAgent()
+    res = agent.run(
+        processed_data=two_head_data,
+        classifier_code=str(tmp_path / "classifier.py"),
+        predictions=str(tmp_path / "predictions_test.csv"),
+        retune_request=str(retune_path),
+        finetuned_base_dir=str(tmp_path / "finbert_finetuned"),
+    )
+
+    assert os.path.isdir(res["up_model_dir"])
+    assert os.path.isdir(res["down_model_dir"])

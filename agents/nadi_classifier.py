@@ -21,10 +21,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 try:
     from agents.base import Agent
     from agents.contracts import LABELS, PREDICTION_COLUMNS
+    from agents.finbert_finetuner import HEADS, train_finbert
     from agents.state import PipelineState
 except ModuleNotFoundError:
     from base import Agent
     from contracts import LABELS, PREDICTION_COLUMNS
+    from finbert_finetuner import HEADS, train_finbert
     from state import PipelineState
 
 OUTPUT_DIR = "outputs"
@@ -78,6 +80,58 @@ def next_head_training_params(history: list[dict], *, collapsed: bool) -> dict:
             last["focus_weight_multiplier"] + TRAINING_MULTIPLIER_STEP,
         ),
     }
+
+
+def _heads_needing_training(requested: list[str], already_trained: set[str]) -> set[str]:
+    """Which head(s) train this pass. Before either head has a checkpoint, the
+    baseline pass trains both regardless of what was requested (Nadi cannot
+    classify with only one head published). Once both exist, only the head(s)
+    Manager actually flagged retrain."""
+    if not already_trained:
+        return set(HEADS)
+    return set(requested)
+
+
+def fine_tune(state: PipelineState) -> dict:
+    """LangGraph node: train whichever directional head(s) need it this pass
+    (ADR 0001). A no-op until the first retune — cold start (iteration 0, no
+    retune_request at all) stays on pretrained FinBERT, never fine-tuning
+    just because no checkpoint exists yet. `heads_to_retrain` is only ever
+    set by `ClassifierAgent.run()` when a retune_request was parsed, so its
+    absence from state is exactly the cold-start signal.
+
+    Heads not in the returned dict are left untouched — LangGraph merges only
+    the keys a node returns, so an unflagged head's checkpoint and history
+    survive unchanged."""
+    if "heads_to_retrain" not in state:
+        return {}
+    already_trained = {head for head in HEADS if state.get(f"{head}_model_dir")}
+    heads = _heads_needing_training(state.get("heads_to_retrain") or [], already_trained)
+    if not heads:
+        return {}
+
+    base_dir = state.get("finetuned_base_dir") or os.path.join(OUTPUT_DIR, "finbert_finetuned")
+    collapsed = set(state.get("collapsed_heads") or [])
+    out: dict = {}
+    for head in sorted(heads):
+        history = state.get(f"{head}_training_history", [])
+        params = next_head_training_params(history, collapsed=head in collapsed)
+        result = train_finbert(
+            data_path=state["processed_data_path"],
+            out_dir=os.path.join(base_dir, head),
+            head=head,
+            learning_rate=params["learning_rate"],
+            focus_weight_multiplier=params["focus_weight_multiplier"],
+            parent_model_dir=state.get(f"{head}_model_dir"),
+        )
+        own_accuracy = result["report"]["val_class_accuracy"].get(head, 0.0)
+        previous_accuracy = history[-1].get("val_class_accuracy") if history else None
+        regressed = previous_accuracy is not None and own_accuracy < previous_accuracy
+        out[f"{head}_model_dir"] = result["model_dir"]
+        out[f"{head}_training_history"] = [
+            {**params, "val_class_accuracy": own_accuracy, "regressed": regressed}
+        ]
+    return out
 
 
 # --- Optional "agentic" code generation via a local LLM (Ollama) ---------------
@@ -440,9 +494,11 @@ def build_graph(checkpointer):
     from langgraph.graph import StateGraph, START, END
 
     builder = StateGraph(PipelineState)
+    builder.add_node("fine_tune", fine_tune)
     builder.add_node("generate_code", generate_code)
     builder.add_node("run_classifier", run_classifier)
-    builder.add_edge(START, "generate_code")
+    builder.add_edge(START, "fine_tune")
+    builder.add_edge("fine_tune", "generate_code")
     builder.add_edge("generate_code", "run_classifier")
     builder.add_edge("run_classifier", END)
     return builder.compile(checkpointer=checkpointer)
@@ -457,32 +513,43 @@ class ClassifierAgent(Agent):
         return build_graph(checkpointer)
 
     def run(self, processed_data: str, classifier_code: str, predictions: str,
-            retune_request: str | None = None, model_dir: str | None = None) -> dict:
-        """Runs the classifier generation and prediction step.
+            retune_request: str | None = None, model_dir: str | None = None,
+            finetuned_base_dir: str = os.path.join(OUTPUT_DIR, "finbert_finetuned")) -> dict:
+        """Runs the fine-tuning (ADR 0001), classifier generation, and
+        prediction steps.
 
         Args:
             processed_data: Path to input processed_data.csv
             classifier_code: Output path for classifier.py
             predictions: Output path for predictions_test.csv
-            retune_request: Optional path to input retune_request.json
+            retune_request: Optional path to input retune_request.json. Its
+                `heads_to_retrain` / `collapsed_heads` fields (Manager's
+                signal, Task 8) drive which directional head(s) fine_tune()
+                retrains this pass.
             model_dir: Optional path to fine-tuned weights (outputs/finbert_finetuned).
                        When set and the folder exists, the classifier loads it instead
                        of pretrained FinBERT.
+            finetuned_base_dir: Base directory the two directional heads publish
+                       their checkpoints under (<base>/up, <base>/down).
         """
         state = {
             "processed_data_path": os.path.abspath(processed_data),
             "classifier_code_path": os.path.abspath(classifier_code),
             "predictions_path": os.path.abspath(predictions),
+            "finetuned_base_dir": os.path.abspath(finetuned_base_dir),
         }
         if model_dir:
             state["model_dir"] = os.path.abspath(model_dir)
         if retune_request is not None and os.path.exists(retune_request):
             try:
                 with open(retune_request, "r", encoding="utf-8") as f:
-                    state["retune_request"] = json.load(f)
+                    retune_req = json.load(f)
+                state["retune_request"] = retune_req
+                state["heads_to_retrain"] = retune_req.get("heads_to_retrain", [])
+                state["collapsed_heads"] = retune_req.get("collapsed_heads", [])
             except Exception as e:
                 print(f"[nadi] Warning: Failed to parse retune_request file: {e}")
-            
+
         return self._invoke(state)
 
 if __name__ == "__main__":
