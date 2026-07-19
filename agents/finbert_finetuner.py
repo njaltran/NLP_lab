@@ -20,6 +20,7 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
+from transformers import logging as hf_logging
 
 try:
     from agents.env import load_dotenv
@@ -30,6 +31,15 @@ except ModuleNotFoundError:
 
 load_dotenv()
 HF_TOKEN = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+
+# Every head's first training pass loads BASE_MODEL's pretrained 3-class head
+# into a 2-class model on purpose (ADR 0002) -- the classifier layer's shape
+# HAS to mismatch and get reinitialized, that's the whole point of fine-tuning
+# for a different label count. transformers' own "LOAD REPORT" table for this
+# is expected noise, not a diagnostic; quieted so it doesn't read as an error
+# on every run. Warnings that mean something (e.g. a real download failure)
+# still raise as exceptions, so this can't hide an actual break.
+hf_logging.set_verbosity_error()
 
 BASE_MODEL = "ProsusAI/finbert"
 HEADS = ("up", "down")
