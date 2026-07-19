@@ -77,9 +77,7 @@ class FakeSabina:
             "class_accuracy": {"up": 0.3, "down": 0.2, "neutral": 0.5},
             "misclassified_ids": [],
             "proposal": {"recommended_action": "retune", "reason": "low",
-                         "focus_labels": ["down"],
-                         "suggested_params": {"threshold": 0.5, "max_length": 128},
-                         "code_notes": ""},
+                         "focus_labels": ["down"]},
         }
         os.makedirs("outputs", exist_ok=True)
         Path("outputs/evaluation_report.json").write_text(json.dumps(report))
@@ -212,9 +210,9 @@ def test_graph_cycles_then_finalizes(tmp_path, monkeypatch):
                  "final_results.csv", "final_report.json"):
         assert (tmp_path / "outputs" / name).exists(), f"missing {name}"
 
-    # Retune params escalated across cycle passes (no exact repeat).
+    # Jack flags a directional head for Nadi to retrain (ADR 0001).
     req = json.loads((tmp_path / "outputs" / "retune_request.json").read_text())
-    assert "suggested_params" in req
+    assert req["heads_to_retrain"] == ["down"]
 
     # Default build never asks Nadi for fine-tuned weights.
     assert nadi.model_dir is None

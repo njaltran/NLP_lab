@@ -18,9 +18,11 @@ from typing import Annotated, TypedDict
 try:
     from agents.base import Agent
     from agents.contracts import build_final_results, write_explanation_sample
+    from agents.finbert_finetuner import HEADS
 except ModuleNotFoundError:
     from base import Agent
     from contracts import build_final_results, write_explanation_sample
+    from finbert_finetuner import HEADS
 
 OUTPUT_DIR = "outputs"
 
@@ -38,10 +40,12 @@ class ManagerState(TypedDict):
     # --- loop progress (plain fields → merged, latest wins) ---
     iteration: int               # loop counter, starts at 1
     accuracy: float              # accuracy from the current report
-    final_action: str            # "retune" | "proceed"
+    final_action: str            # "retune" | "proceed" | "fail" (ADR 0004)
     decision: str                # "accept" | "override"
     overrides: dict              # fields Jack changed; {} if accept
     notes: str                   # rationale (filled by the LLM node, step 5)
+    heads_to_retrain: list[str]  # directional head(s) Nadi should retrain (ADR 0001)
+    collapsed_heads: list[str]   # subset of heads_to_retrain that have collapsed
 
     # --- convergence config (set once at start; see `decide`) ---
     patience: int                # how many recent iterations to watch for progress
@@ -55,7 +59,6 @@ class ManagerState(TypedDict):
     # iterations — the raw material for the convergence and adaptation decisions.
     decision_log: Annotated[list, operator.add]      # human-readable note per step
     accuracy_history: Annotated[list, operator.add]  # one accuracy per iteration
-    tried_params: Annotated[list, operator.add]      # retune params used per retune
 
     # --- I/O config (paths to contract files; optional, read via .get) ---
     predictions_path: str        # Nadi's predictions_test.csv (to sample / finalize)
@@ -86,79 +89,39 @@ def _write_decision(state: "ManagerState") -> None:
     })
 
 
-# Ordered escalation schedule for the retune loop. The first retune re-uses
-# Sabina's proposed params as-is; every retune AFTER that walks down this list
-# (skipping anything already tried) so each attempt is genuinely different rather
-# than a repeat. The levers: lower `threshold` so fewer rows get forced to the
-# `neutral` fallback class, and raise `boost_factor` so Nadi's focus-label boost
-# (applied to whatever Sabina flagged as weakest) has more effect each retune.
-# `max_length` was dropped as a knob: no headline in the dataset exceeds 128
-# tokens (max 117, measured 2026-07-04), so raising it never changed anything.
-# Tune these values here — nothing downstream is hardcoded to them.
-_RETUNE_SCHEDULE = [
-    {"threshold": 0.45, "boost_factor": 1.25},
-    {"threshold": 0.40, "boost_factor": 1.35},
-    {"threshold": 0.35, "boost_factor": 1.45},
-    {"threshold": 0.30, "boost_factor": 1.55},
-    {"threshold": 0.25, "boost_factor": 1.65},
-    {"threshold": 0.20, "boost_factor": 1.75},
-]
+def _weak_heads(report: dict, floor: float) -> list[str]:
+    """Which directional head(s) Nadi should retrain this pass (ADR 0001: Jack
+    decides WHETHER/WHICH, Nadi decides HOW).
 
-# Revert-and-perturb policy: when the last iteration's accuracy falls more than
-# _REGRESSION_DELTA below the best iteration's, the escalation clearly overshot —
-# go back to the params that produced the best iteration and move ONE knob one
-# step, instead of marching further down the schedule (live case: 0.39 → 0.23
-# after the last schedule entry boosted the wrong labels).
-_REGRESSION_DELTA = 0.05
-_THRESHOLD_STEP = 0.05
-_BOOST_STEP = 0.10
-_BOOST_MAX = 2.0   # threshold is clamped below; without a ceiling here, repeated
-                   # perturbs would escalate the boost without bound
+    A specifically collapsed head takes priority over Sabina's general
+    `focus_labels` — collapse is a sharper, more urgent signal than "weakest
+    within a margin", so it wins outright when both are available. Otherwise
+    falls back to Sabina's `proposal.focus_labels`, filtered to the two heads
+    that actually have a checkpoint to retrain (`neutral` has none).
+
+    Never empty during a retune: if neither signal names a directional head
+    (e.g. focus_labels names only `neutral`), retrain both heads rather than
+    sending Nadi a retune with nothing to actually retune — an empty list
+    would burn an iteration with zero chance of changing the result."""
+    collapsed = _collapsed_heads(report, floor)
+    if collapsed:
+        return collapsed
+    focus_labels = report.get("proposal", {}).get("focus_labels", [])
+    heads = [head for head in HEADS if head in focus_labels]
+    return heads or list(HEADS)
 
 
-def _same(a: dict, b: dict) -> bool:
-    """Param-set equality on shared keys only: Sabina's proposal omits params she
-    doesn't set (e.g. `boost_factor`), and Nadi fills those from the same defaults
-    the schedule starts at — so a candidate that matches a tried set on every
-    shared key would regenerate an identical classifier."""
-    shared = a.keys() & b.keys()
-    return bool(shared) and all(a[k] == b[k] for k in shared)
-
-
-def _next_params(tried: list, history: list = ()) -> dict:
-    """Pick the next retune params.
-
-    1. Revert-and-perturb: if the latest accuracy regressed more than
-       _REGRESSION_DELTA below the best, perturb the best iteration's params.
-    2. Otherwise: first schedule entry not already tried, or the last entry once
-       the schedule is exhausted (the iteration cap still bounds the loop, so
-       returning a repeat here is safe)."""
-    if len(history) >= 2 and tried:
-        best = max(range(len(history)), key=lambda i: history[i])
-        if history[-1] < history[best] - _REGRESSION_DELTA:
-            # Params per iteration: iteration 1 ran on Nadi's defaults, each
-            # later one on the next `tried` entry.
-            per_iteration = [{}] + list(tried)
-            base = per_iteration[best] if best < len(per_iteration) else {}
-            # Fill both knobs with Nadi's defaults so every candidate carries
-            # full params: a partial dict (e.g. boost only) would make _same()
-            # falsely match schedule entries that share just that one key.
-            threshold = base.get("threshold", 0.5)
-            boost = base.get("boost_factor", 1.25)
-            base = {**base, "threshold": threshold, "boost_factor": boost}
-            candidates = [
-                {**base, "threshold": round(max(0.05, threshold - _THRESHOLD_STEP), 2)},
-                {**base, "threshold": round(min(0.60, threshold + _THRESHOLD_STEP), 2)},
-                {**base, "boost_factor": round(min(_BOOST_MAX, boost + _BOOST_STEP), 2)},
-            ]
-            for candidate in candidates:
-                if not any(_same(candidate, t) for t in tried):
-                    return candidate
-
-    for params in _RETUNE_SCHEDULE:
-        if not any(_same(params, t) for t in tried):
-            return params
-    return _RETUNE_SCHEDULE[-1]
+def _collapsed_heads(report: dict, floor: float) -> list[str]:
+    """Which directional head(s) have collapsed (recall below `floor`) —
+    passed through to Nadi as `collapsed_heads` so `next_head_training_params`
+    can start that head's next attempt with a stronger focus weight."""
+    class_accuracy = report.get("class_accuracy", {})
+    class_support = report.get("class_support")
+    return [
+        head for head in HEADS
+        if class_accuracy.get(head, 1.0) < floor
+        and (class_support is None or class_support.get(head, 0) > 0)
+    ]
 
 
 def _is_collapsed(report: dict, floor: float) -> bool:
@@ -202,9 +165,13 @@ def _converged(history: list, patience: int, min_delta: float) -> bool:
 
 
 def decide(state: ManagerState) -> dict:
-    """Threshold gate (deterministic). Decides retune vs. proceed, and when
-    retuning, chooses the next hyperparameters from history. Returns only the
-    keys it changed (LangGraph merges them into the running state).
+    """Threshold gate (deterministic). Decides retune vs. proceed vs. fail.
+    Returns only the keys it changed (LangGraph merges them into the running
+    state).
+
+    Jack no longer picks retune hyperparameters (ADR 0001) — that moved to
+    Nadi. This gate decides WHETHER to retune and, on a collapse, WHICH
+    head(s); Nadi decides HOW.
     """
     report = state["evaluation_report"]
     accuracy = report["accuracy"]
@@ -218,26 +185,29 @@ def decide(state: ManagerState) -> dict:
     min_delta = state.get("min_delta", 0.01)
 
     # A collapsed class means the aggregate accuracy is a degenerate win — don't
-    # let it clear the gate. Cap/convergence can still force proceed; select_best
-    # then restores the best (collapse-penalized) earlier iteration anyway.
-    collapsed = _is_collapsed(report, state.get("min_class_accuracy", 0.05))
+    # let it clear the gate. Unlike before, cap/convergence can no longer force
+    # a collapsed pass to proceed either (ADR 0004): that becomes "fail".
+    floor = state.get("min_class_accuracy", 0.05)
+    collapsed = _is_collapsed(report, floor)
 
-    # Three independent reasons to stop retuning and move on.
     cleared = accuracy >= state["target_accuracy"] and not collapsed
     cap_hit = iteration >= state["max_iterations"]        # out of budget
     converged = _converged(history, patience, min_delta)  # progress has stalled
-    final_action = "proceed" if (cleared or cap_hit or converged) else "retune"
 
     if cleared:
-        why = "cleared target"
-    elif converged:
-        why = "converged (no improvement), proceeding"
-    elif cap_hit:
-        why = "cap hit, forcing proceed"
-    elif collapsed and accuracy >= state["target_accuracy"]:
-        why = "accuracy clears target but a class collapsed, retuning"
+        final_action, why = "proceed", "cleared target"
+    elif cap_hit or converged:
+        stalled = "converged (no improvement)" if converged else "cap hit"
+        if collapsed:
+            final_action = "fail"
+            why = f"{stalled} while a class is still collapsed — refusing to finalize"
+        else:
+            final_action = "proceed"
+            why = f"{stalled}, forcing proceed"
     else:
-        why = "below target, retuning"
+        final_action = "retune"
+        why = ("accuracy clears target but a class collapsed, retuning"
+               if collapsed and accuracy >= state["target_accuracy"] else "below target, retuning")
     note = (f"iteration {iteration}: accuracy {accuracy:.2f} vs target "
             f"{state['target_accuracy']:.2f} — {why}")
 
@@ -251,23 +221,21 @@ def decide(state: ManagerState) -> dict:
     }
 
     if final_action == "retune":
-        # First retune trusts Sabina's proposal as-is (accept); every retune after
-        # that adapts the params (override), because a repeat proposal has already
-        # failed once. `tried_params` records what we actually used either way.
-        # A proposal without suggested_params (Sabina recommended proceed but the
-        # collapse floor forced a retune) has nothing to accept — take the
-        # schedule instead of re-running Nadi's defaults.
         proposal = report.get("proposal", {})
-        tried = state.get("tried_params", [])
-        if not tried and proposal.get("suggested_params"):
-            used = proposal["suggested_params"]
+        heads = _weak_heads(report, floor)
+        out["heads_to_retrain"] = heads
+        out["collapsed_heads"] = _collapsed_heads(report, floor)
+        # "accept" when Jack's head selection matches Sabina's raw focus_labels
+        # (filtered to heads); "override" when the empty-focus_labels fallback
+        # (both heads) or a collapse-driven selection changed it.
+        sabina_heads = [head for head in HEADS if head in proposal.get("focus_labels", [])]
+        if heads == sabina_heads and sabina_heads:
             out["decision"], out["overrides"] = "accept", {}
         else:
-            used = _next_params(tried, history)
             out["decision"] = "override"
-            out["overrides"] = {"suggested_params": used,
-                                "focus_labels": proposal.get("focus_labels", [])}
-        out["tried_params"] = [used]
+            out["overrides"] = {"heads_to_retrain": heads}
+    elif final_action == "fail":
+        out["decision"], out["overrides"] = "override", {"final_action": "fail"}
     else:
         # Proceeding. Override only when the gate overrules Sabina's recommendation
         # (e.g. she says retune but the cap/convergence forces proceed); else accept.
@@ -289,9 +257,13 @@ def route_entry(state: ManagerState) -> str:
 
 
 def route_after_decide(state: ManagerState) -> str:
-    """Router: retune, or sample for explanation on proceed. Reads the decision
-    the gate already made."""
-    return "retune" if state["final_action"] == "retune" else "sample"
+    """Router: retune, sample for explanation on proceed, or fail. Reads the
+    decision the gate already made."""
+    if state["final_action"] == "retune":
+        return "retune"
+    if state["final_action"] == "fail":
+        return "fail"
+    return "sample"
 
 
 def write_retune(state: ManagerState) -> dict:
@@ -299,22 +271,31 @@ def write_retune(state: ManagerState) -> dict:
     Manager hands off and waits for Nadi+Sabina to produce the next report."""
     report = state["evaluation_report"]
     proposal = report.get("proposal", {})
-    overrides = state.get("overrides", {})
     _write_decision(state)
     _write_json("retune_request.json", {
         "iteration": state["iteration"],
         "reason": proposal.get("reason", state["notes"]),
         "current_accuracy": state["accuracy"],
         "target_accuracy": state["target_accuracy"],
-        "focus_labels": overrides.get("focus_labels", proposal.get("focus_labels", [])),
+        "heads_to_retrain": state.get("heads_to_retrain", []),
+        "collapsed_heads": state.get("collapsed_heads", []),
         "misclassified_ids": report.get("misclassified_ids", []),
-        "suggested_params": {**proposal.get("suggested_params", {}),
-                             **overrides.get("suggested_params", {})},
-        # Sabina's code observations, passed through unchanged — Nadi's optional
-        # LLM code adaptation prompts with these (falls back to `reason` if empty).
-        "code_notes": proposal.get("code_notes", ""),
     })
     return {"decision_log": [f"iteration {state['iteration']}: wrote retune_request.json"]}
+
+
+def fail(state: ManagerState) -> dict:
+    """Terminal (ADR 0004): the iteration cap or convergence was hit while a
+    class is still collapsed. Writes the audit record, then fails loudly —
+    no sample_for_explanation.csv, final_results.csv, or final_report.json —
+    rather than silently finalizing a collapsed model. The exception
+    propagates through `ManagerAgent.run()` and the unified pipeline's `gate`
+    node, aborting the whole run."""
+    _write_decision(state)
+    raise RuntimeError(
+        f"iteration {state['iteration']}: stopping (cap/convergence) while a "
+        "class is still collapsed — refusing to finalize. See decision.json."
+    )
 
 
 def write_sample(predictions_path: str, sample_size: int = 300) -> int:
@@ -436,15 +417,17 @@ def build_graph(checkpointer):
     b.add_node("rationale", rationale)
     b.add_node("write_retune", write_retune)
     b.add_node("proceed", proceed)
+    b.add_node("fail", fail)
     b.add_node("finalize", finalize)
     b.add_conditional_edges(START, route_entry, {"decide": "decide", "finalize": "finalize"})
     b.add_edge("decide", "rationale")       # gate first, then explain
     b.add_conditional_edges(
         "rationale", route_after_decide,
-        {"retune": "write_retune", "sample": "proceed"},
+        {"retune": "write_retune", "sample": "proceed", "fail": "fail"},
     )
     b.add_edge("write_retune", END)
     b.add_edge("proceed", END)
+    b.add_edge("fail", END)
     b.add_edge("finalize", END)
     return b.compile(checkpointer=checkpointer)
 
@@ -510,9 +493,7 @@ if __name__ == "__main__":
         "proposal": {
             "recommended_action": "retune",
             "reason": "accuracy 0.54 below target 0.60; down/neutral weakest",
-            "focus_labels": ["down", "neutral"],
-            "suggested_params": {"threshold": 0.5, "max_length": 128},
-            "code_notes": "threshold hardcoded at 0.5 in classifier.py"},
+            "focus_labels": ["down", "neutral"]},
     }
     # No retune report ships in mock_data/, so materialise one to a temp file —
     # the API takes a path, so the demo feeds it a path.
