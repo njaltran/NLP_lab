@@ -105,10 +105,11 @@ def test_once_both_trained_only_the_flagged_head_retrains():
     assert _heads_needing_training(requested=[], already_trained=already) == set()
 
 
-def test_fine_tune_trains_at_the_same_max_length_the_classifier_infers_at(monkeypatch):
+def test_fine_tune_trains_with_the_pinned_max_length_and_epoch_count(monkeypatch):
     """train_finbert's max_length must match CLASSIFIER_TEMPLATE's MAX_LENGTH --
     otherwise every head trains truncated at one length while inference
-    truncates at another."""
+    truncates at another -- and epochs must be the pinned per-round count
+    (ADR 0001 Q11: fixed, not retune-tunable)."""
     import agents.nadi_classifier as nc
 
     captured = {}
@@ -128,6 +129,7 @@ def test_fine_tune_trains_at_the_same_max_length_the_classifier_infers_at(monkey
     })
 
     assert captured["max_length"] == nc.MAX_LENGTH
+    assert captured["epochs"] == nc.EPOCHS_PER_ROUND == 3
 
 
 # --- fine_tune node (integration; trains real tiny checkpoints) ---------------

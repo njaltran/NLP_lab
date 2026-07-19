@@ -139,7 +139,7 @@ def train_finbert(
     head: str,
     learning_rate: float,
     focus_weight_multiplier: float = 1.0,
-    epochs: int = 1,
+    epochs: int = 3,
     batch_size: int = 16,
     max_length: int = 64,
     seed: int = 42,

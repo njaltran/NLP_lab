@@ -42,6 +42,15 @@ OUTPUT_DIR = "outputs"
 # truncation and infer at another.
 MAX_LENGTH = 128
 
+# Epochs per fine-tune call, pinned like MAX_LENGTH (ADR 0001 Q11) -- not a
+# retune-tunable knob. _train_epochs() (finbert_finetuner.py) already keeps
+# only the best-val-accuracy checkpoint within a call, so more epochs per
+# round costs time, not quality; 3 matches the manual CLI's existing default
+# (agents/finetune_finbert.py --epochs 3) rather than the trainer's own
+# single-epoch default, which was too small a per-round increment -- it risked
+# the convergence check mistaking under-training for a plateau.
+EPOCHS_PER_ROUND = 3
+
 # --- Per-head fine-tuning hyperparameter schedule (ADR 0001) -------------------
 # Nadi, not Manager, picks these now: given one directional head's own prior
 # retune attempts, choose the next learning rate and focus weight. Values
@@ -135,6 +144,7 @@ def fine_tune(state: PipelineState) -> dict:
             focus_weight_multiplier=params["focus_weight_multiplier"],
             parent_model_dir=state.get(f"{head}_model_dir"),
             max_length=MAX_LENGTH,
+            epochs=EPOCHS_PER_ROUND,
         )
         own_accuracy = result["report"]["val_class_accuracy"].get(head, 0.0)
         previous_accuracy = history[-1].get("val_class_accuracy") if history else None
