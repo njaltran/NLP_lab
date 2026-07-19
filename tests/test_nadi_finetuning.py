@@ -7,6 +7,7 @@ independent (ADR 0002 decision to split the heads applies to tuning too).
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -188,18 +189,32 @@ def test_fine_tune_only_retrains_the_flagged_head(tmp_path, two_head_data):
 @pytest.mark.slow
 def test_classifier_agent_run_fine_tunes_when_flagged(tmp_path, two_head_data):
     """End-to-end: ClassifierAgent.run() with heads_to_retrain in the retune
-    request trains checkpoints before generating/running the classifier."""
+    request trains checkpoints, then generates and runs a classifier.py that
+    actually loads both heads and produces contract-shaped predictions --
+    proving the two-head template (Task 6) is wired to fine_tune's output
+    (Task 5), not just that checkpoints happen to exist on disk."""
+    import pandas as pd
+
     retune_path = tmp_path / "retune_request.json"
     retune_path.write_text(json.dumps({"iteration": 1, "heads_to_retrain": ["up", "down"]}))
 
     agent = ClassifierAgent()
+    pred_path = tmp_path / "predictions_test.csv"
     res = agent.run(
         processed_data=two_head_data,
         classifier_code=str(tmp_path / "classifier.py"),
-        predictions=str(tmp_path / "predictions_test.csv"),
+        predictions=str(pred_path),
         retune_request=str(retune_path),
         finetuned_base_dir=str(tmp_path / "finbert_finetuned"),
     )
 
     assert os.path.isdir(res["up_model_dir"])
     assert os.path.isdir(res["down_model_dir"])
+
+    code = Path(res["classifier_code_path"]).read_text()
+    assert f"UP_MODEL_DIR = {res['up_model_dir']!r}" in code
+    assert f"DOWN_MODEL_DIR = {res['down_model_dir']!r}" in code
+
+    df = pd.read_csv(pred_path)
+    assert set(df["predicted_label"]) <= {"up", "down", "neutral"}
+    assert (df["prob_up"] + df["prob_down"] + df["prob_neutral"]).round(2).eq(1.0).all()
