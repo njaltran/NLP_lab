@@ -115,23 +115,16 @@ def _(GITHUB_RAW_BASE, certifi, io, json, pd, ssl, urllib):
     test_preds = preds[preds["split"] == "test"] if "split" in preds.columns else preds
 
     LABELS = ["up", "down", "neutral"]
-    TARGET = 0.6  # target accuracy the gate uses (see retune_request.json)
+    TARGET = 0.60  # target accuracy the gate uses (see retune_request.json)
     CHANCE = 1 / 3
 
-    # Manager loop history: one validation accuracy per run, plus the params
-    # each retune actually tried (run 1 ran the classifier defaults).
+    # Manager loop history: one validation accuracy per run. Retunes no longer
+    # carry a per-run hyperparameter set to display -- Nadi picks its own
+    # learning rate/focus weight per directional head internally now (ADR
+    # 0001), so decision.json only records WHICH head(s) it flagged, not what
+    # Nadi did with them.
     hist = decision.get("accuracy_history", [])
-    tried = [{}] + decision.get("tried_params", [])
-    runs = pd.DataFrame(
-        {
-            "run": range(1, len(hist) + 1),
-            "val_accuracy": hist,
-            "params": [
-                ", ".join(f"{k}={v}" for k, v in tried[i].items()) if i < len(tried) and tried[i] else "defaults"
-                for i in range(len(hist))
-            ],
-        }
-    )
+    runs = pd.DataFrame({"run": range(1, len(hist) + 1), "val_accuracy": hist})
     return (
         CHANCE,
         DATA_DIR,
@@ -148,7 +141,7 @@ def _(GITHUB_RAW_BASE, certifi, io, json, pd, ssl, urllib):
 
 
 @app.cell
-def _(CHANCE, decision, evaluation, mo, runs, test_preds):
+def _(CHANCE, TARGET, decision, evaluation, mo, runs, test_preds):
     # --- Hero: the findings, as numbers. --------------------------------------
     acc = test_preds["correct"].mean() if not test_preds.empty else 0.0
     class_acc = evaluation.get("class_accuracy", {})
@@ -181,7 +174,7 @@ def _(CHANCE, decision, evaluation, mo, runs, test_preds):
     else:
         tiles = f"""
       <div style="display:flex;gap:14px;flex-wrap:wrap;">
-        {tile(f"{acc:.0%}", "final test accuracy", f"chance = {CHANCE:.0%} · target 60%")}
+        {tile(f"{acc:.0%}", "final test accuracy", f"chance = {CHANCE:.0%} · target {TARGET:.0%}")}
         {tile(f"{best_val:.0%}", "best validation run", f"started at {first_val:.0%} · {n_runs} run{'s' if n_runs != 1 else ''} · kept")}
         {tile(f"{down_acc:.0%}", "accuracy on “down”", "the model can't see bad news")}
         {tile(f"{len(test_preds):,}", "test headlines", f"{years} · {test_preds['ticker'].nunique()} tickers")}
@@ -225,7 +218,6 @@ def _(C, PCT, TARGET, alt, mo, runs, themed):
             tooltip=[
                 alt.Tooltip("run:O"),
                 alt.Tooltip("val_accuracy:Q", format=".0%", title="accuracy"),
-                alt.Tooltip("params:N", title="params tried"),
             ],
         )
         line = base.mark_line(color=C["blue"], strokeWidth=2.5)
@@ -245,7 +237,7 @@ def _(C, PCT, TARGET, alt, mo, runs, themed):
             .mark_text(dy=-16, fontSize=14, fontWeight=600, color=C["blue_dark"], align="left", dx=-8)
             .encode(x="run:O", y="val_accuracy:Q", text="text:N")
         )
-        target_df = alt.Chart(alt.Data(values=[{"y": TARGET, "t": "target 60%"}]))
+        target_df = alt.Chart(alt.Data(values=[{"y": TARGET, "t": f"target {TARGET:.0%}"}]))
         target = target_df.mark_rule(strokeDash=[6, 5], color=C["muted"], strokeWidth=1.5).encode(y="y:Q")
         target_txt = target_df.mark_text(
             align="right", dy=-9, x="width", fontSize=12, color=C["muted"]
@@ -254,9 +246,9 @@ def _(C, PCT, TARGET, alt, mo, runs, themed):
         best_acc = runs["val_accuracy"].max()
         last_acc = runs["val_accuracy"].iloc[-1]
         story = (
-            f"run {best_run} peaked at {best_acc:.0%}, then over-tuning collapsed it — the Manager kept run {best_run}"
+            f"run {best_run} peaked at {best_acc:.0%}, then a retune regressed it — the Manager kept run {best_run}"
             if last_acc < best_acc
-            else "each retune tries new hyperparameters from the Evaluator's schedule"
+            else "each retune fine-tunes whichever directional head the Evaluator flagged as weakest"
         )
         # NB: charts are displayed raw, not via mo.ui.altair_chart — marimo's
         # selection wrapper silently drops bar marks from layered charts.

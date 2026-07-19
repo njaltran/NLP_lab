@@ -9,9 +9,72 @@ secrets and parses flags — the orchestration lives in the graph. Run:
 """
 
 import argparse
+import json
+import os
 
+from agents.console import panel
 from agents.env import load_dotenv
 from agents.pipeline_graph import run, OUT
+
+
+def _print_header(args) -> None:
+    """What this run is about to do, printed before the first slow step (training)."""
+    rows = [
+        ("gate", f"accuracy ≥ {args.target_accuracy:.2f} · max {args.max_iterations}"
+                 f" iterations · patience {args.patience}"),
+        ("label band", f"±{args.threshold:.1%} next-day close → up / down / neutral"),
+        ("fine-tuning", f"{args.epochs} epoch{'s' if args.epochs != 1 else ''} per round"
+                        if args.epochs is not None else "pinned default epochs per round"),
+    ]
+    if args.dataset_end:
+        rows.append(("dataset end", f"{args.dataset_end} (later rows dropped)"))
+    rows.append(("explanations", "offline fallback" if args.no_ollama else "Ollama"))
+    print()
+    panel("stock-move prediction · FinBERT + feedback retune loop", rows)
+    print()
+
+
+def _load(name: str) -> dict:
+    path = os.path.join(OUT, name)
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _print_summary(final: dict, target: float) -> None:
+    """The numbers someone actually wants after a run: what the model scored on
+    rows it never saw, and how the loop got there. Read back from the contract
+    files rather than from the returned state, so what is printed is what was
+    actually written."""
+    report, decision = _load("final_report.json"), _load("decision.json")
+    rows = []
+
+    accuracy = report.get("final_accuracy")
+    if accuracy is not None:
+        verdict = (f"[green]target {target:.2f} met[/]" if accuracy >= target
+                   else f"[red]below target {target:.2f}[/]")
+        rows.append(("test accuracy", f"[bold]{accuracy:.3f}[/]  {verdict}"))
+
+    per_class = report.get("class_accuracy", {})
+    support = report.get("class_support", {})
+    if per_class:
+        rows.append(("recall", "  ".join(
+            f"{label} {score:.2f}" + (f"[dim] (n={support[label]})[/]" if label in support else "")
+            for label, score in per_class.items())))
+
+    trend = decision.get("accuracy_history", [])
+    if trend:
+        marks = " → ".join(f"{score:.2f}" for score in trend)
+        rows.append(("accuracy trend", f"{marks}  [dim](validation)[/]"))
+
+    rows.append(("explanations", f"{report.get('explanations_generated', 0)}"
+                                 f"/{report.get('test_set_size', 0)} test rows"))
+    rows.append(("outputs", f"{OUT}/final_results.csv · final_report.json"))
+
+    print()
+    panel(f"complete · {final['final_action']} at iteration {final['iteration']}", rows)
+    print()
 
 
 def main():
@@ -35,13 +98,13 @@ def main():
     args = p.parse_args()
 
     load_dotenv()  # make .env secrets (e.g. HF_TOKEN) visible to the agents
+    _print_header(args)
     final = run(threshold=args.threshold, target_accuracy=args.target_accuracy,
                 max_iterations=args.max_iterations, patience=args.patience,
                 min_delta=args.min_delta, sample_size=args.sample_size,
                 use_ollama=not args.no_ollama, data_dir=args.data_dir,
                 dataset_end=args.dataset_end, epochs=args.epochs)
-    print(f"\n[main] done -- {final['final_action']} at iteration "
-          f"{final['iteration']}. Outputs in {OUT}/")
+    _print_summary(final, args.target_accuracy)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ dependencies = [
     "marimo>=0.23.11",
     "pandas>=2.0.0",
     "pyarrow>=24.0.0",
+    "rich>=13.0.0",
     "torch>=2.2.0",
     "transformers>=4.38.0",
     "yfinance>=0.2.40",
