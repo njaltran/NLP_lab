@@ -144,7 +144,7 @@ def fine_tune(state: PipelineState) -> dict:
             focus_weight_multiplier=params["focus_weight_multiplier"],
             parent_model_dir=state.get(f"{head}_model_dir"),
             max_length=MAX_LENGTH,
-            epochs=EPOCHS_PER_ROUND,
+            epochs=state.get("epochs", EPOCHS_PER_ROUND),
         )
         own_accuracy = result["report"]["val_class_accuracy"].get(head, 0.0)
         previous_accuracy = history[-1].get("val_class_accuracy") if history else None
@@ -375,7 +375,8 @@ class ClassifierAgent(Agent):
 
     def run(self, processed_data: str, classifier_code: str, predictions: str,
             retune_request: str | None = None,
-            finetuned_base_dir: str = os.path.join(OUTPUT_DIR, "finbert_finetuned")) -> dict:
+            finetuned_base_dir: str = os.path.join(OUTPUT_DIR, "finbert_finetuned"),
+            epochs: int = EPOCHS_PER_ROUND) -> dict:
         """Runs the fine-tuning (ADR 0001), classifier generation, and
         prediction steps.
 
@@ -392,12 +393,17 @@ class ClassifierAgent(Agent):
                        reads its own prior checkpoints from here across retune
                        iterations — there is no longer a caller-supplied
                        single `model_dir` opt-in.
+            epochs: Epochs per fine-tune round for every head trained this
+                       pass. Still a fixed value applied uniformly (ADR 0001
+                       Q11) — not something Manager or a retune schedule picks
+                       per iteration, just an override point for manual runs.
         """
         state = {
             "processed_data_path": os.path.abspath(processed_data),
             "classifier_code_path": os.path.abspath(classifier_code),
             "predictions_path": os.path.abspath(predictions),
             "finetuned_base_dir": os.path.abspath(finetuned_base_dir),
+            "epochs": epochs,
         }
         if retune_request is not None and os.path.exists(retune_request):
             try:
@@ -421,6 +427,8 @@ if __name__ == "__main__":
     parser.add_argument("--retune-request", default=None, help="Input retune request JSON path")
     parser.add_argument("--finetuned-base-dir", default=os.path.join(OUTPUT_DIR, "finbert_finetuned"),
                         help="Base dir the up/down heads publish checkpoints under")
+    parser.add_argument("--epochs", type=int, default=EPOCHS_PER_ROUND,
+                        help="Epochs per fine-tune round for every head trained this pass")
 
     args = parser.parse_args()
 
@@ -431,5 +439,6 @@ if __name__ == "__main__":
         predictions=args.predictions,
         retune_request=args.retune_request,
         finetuned_base_dir=args.finetuned_base_dir,
+        epochs=args.epochs,
     )
     print("\nClassifier completed. Predictions at:", res["predictions_path"])

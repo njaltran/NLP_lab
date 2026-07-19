@@ -32,6 +32,9 @@ class PipelineState(TypedDict, total=False):
     # ── Fine-tuning (ADR 0001): Nadi owns training, not a separate agent ────
     finetuned_base_dir: str        # base dir for published checkpoints
                                     # (<base>/up, <base>/down); default outputs/finbert_finetuned
+    epochs: int                    # epochs per fine-tune round, every head trained this pass
+                                    # (default nadi_classifier.EPOCHS_PER_ROUND; ADR 0001 Q11 —
+                                    # fixed per run, not a retune-tunable knob)
     heads_to_retrain: list[str]    # heads Manager flagged this retune; [] before any retune
     collapsed_heads: list[str]     # heads whose class has collapsed (steers the first
                                     # attempt's focus weight — see next_head_training_params)

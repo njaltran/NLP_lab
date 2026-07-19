@@ -39,9 +39,12 @@ class FakeNadi:
     place and counts how many times it ran (so we can prove the graph cycled)."""
     def __init__(self):
         self.calls = 0
+        self.epochs = None
 
-    def run(self, *, processed_data, classifier_code, predictions, retune_request=None):
+    def run(self, *, processed_data, classifier_code, predictions, retune_request=None,
+            epochs=None):
         self.calls += 1
+        self.epochs = epochs
         Path(predictions).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(MOCK_PRED, predictions)
         Path(classifier_code).write_text("THRESHOLD = 0.5\n")  # readable by Sabina/Manager
@@ -224,6 +227,22 @@ def test_graph_cycles_then_finalizes(tmp_path, monkeypatch):
     # Jack flags a directional head for Nadi to retrain (ADR 0001).
     req = json.loads((tmp_path / "outputs" / "retune_request.json").read_text())
     assert req["heads_to_retrain"] == ["down"]
+
+
+@needs_langgraph
+def test_epochs_override_reaches_nadi(tmp_path, monkeypatch):
+    """build_pipeline(epochs=...) must thread through classify() to Nadi's
+    run() call; omitted (default None) must not override Nadi's own default."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "outputs").mkdir()
+
+    with_override = FakeNadi()
+    _run_pipeline(with_override, FakeSabina(), epochs=2)
+    assert with_override.epochs == 2
+
+    without_override = FakeNadi()
+    _run_pipeline(without_override, FakeSabina())
+    assert without_override.epochs is None
 
 
 @needs_langgraph

@@ -29,6 +29,9 @@ def main():
                    help="drop rows after this date before splitting (e.g. 2019-12-31 "
                         "keeps the COVID regime out of the test window, matching the "
                         "fine-tuned model's training data)")
+    p.add_argument("--epochs", type=int, default=None,
+                   help="epochs per fine-tune round for every head trained that pass "
+                        "(default: Nadi's pinned EPOCHS_PER_ROUND)")
     args = p.parse_args()
 
     load_dotenv()  # make .env secrets (e.g. HF_TOKEN) visible to the agents
@@ -36,7 +39,7 @@ def main():
                 max_iterations=args.max_iterations, patience=args.patience,
                 min_delta=args.min_delta, sample_size=args.sample_size,
                 use_ollama=not args.no_ollama, data_dir=args.data_dir,
-                dataset_end=args.dataset_end)
+                dataset_end=args.dataset_end, epochs=args.epochs)
     print(f"\n[main] done -- {final['final_action']} at iteration "
           f"{final['iteration']}. Outputs in {OUT}/")
 

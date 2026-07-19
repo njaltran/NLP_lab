@@ -132,6 +132,36 @@ def test_fine_tune_trains_with_the_pinned_max_length_and_epoch_count(monkeypatch
     assert captured["epochs"] == nc.EPOCHS_PER_ROUND == 3
 
 
+def test_classifier_agent_run_epochs_override_reaches_fine_tune(monkeypatch, tmp_path):
+    """ClassifierAgent.run(epochs=...) must reach fine_tune's train_finbert
+    call -- not just fall back to the pinned EPOCHS_PER_ROUND default."""
+    import agents.nadi_classifier as nc
+
+    captured = {}
+
+    def fake_train_finbert(**kwargs):
+        captured.update(kwargs)
+        return {"model_dir": kwargs["out_dir"],
+                "report": {"val_class_accuracy": {kwargs["head"]: 0.5}}}
+
+    monkeypatch.setattr(nc, "train_finbert", fake_train_finbert)
+
+    retune_path = tmp_path / "retune_request.json"
+    retune_path.write_text(json.dumps({"iteration": 1, "heads_to_retrain": ["up", "down"]}))
+
+    agent = nc.ClassifierAgent()
+    agent.run(
+        processed_data=PROCESSED_DATA,
+        classifier_code=str(tmp_path / "classifier.py"),
+        predictions=str(tmp_path / "predictions_test.csv"),
+        retune_request=str(retune_path),
+        finetuned_base_dir=str(tmp_path / "finbert_finetuned"),
+        epochs=2,
+    )
+
+    assert captured["epochs"] == 2
+
+
 # --- fine_tune node (integration; trains real tiny checkpoints) ---------------
 #
 # train_finbert's val split needs at least one row of a head's own class AND

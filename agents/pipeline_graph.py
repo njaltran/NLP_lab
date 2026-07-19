@@ -151,14 +151,16 @@ class Agents:
 
 
 def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None,
-                   dataset_end=None, sample_size=300, checkpointer=None):
+                   dataset_end=None, sample_size=300, epochs=None, checkpointer=None):
     """Compile the unified pipeline graph. `agents` supplies the five agents (real
     or fake); `threshold` is Aurora's labelling band; `data_dir` overrides where
     Aurora reads fnspid_raw.csv (defaults to the repo `data/`); `dataset_end`
     (YYYY-MM-DD) drops later rows before Aurora's train/test split; `sample_size`
-    is how many rows `select_best` redraws for the explanation sample. The node
-    functions close over these, so no non-serialisable objects live in the graph
-    state.
+    is how many rows `select_best` redraws for the explanation sample; `epochs`,
+    when set, overrides Nadi's pinned per-round epoch count (ADR 0001 Q11 — still
+    a fixed value applied uniformly, just an override point for manual runs; None
+    means use ClassifierAgent's own default). The node functions close over
+    these, so no non-serialisable objects live in the graph state.
 
     There is no `model_dir` opt-in any more: Nadi manages its own two directional
     head checkpoints under FINETUNED_DIR (ADR 0001) and always starts a fresh run
@@ -182,9 +184,10 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None,
         the first pass), then (re)generate and run the classifier. On cycle
         passes, `retune_request_path` points at the Manager's latest retune
         request; on the first pass it is None (cold start, pretrained FinBERT)."""
+        extra = {"epochs": epochs} if epochs is not None else {}
         agents.nadi.run(processed_data=state["processed_data_path"],
                         classifier_code=CODE, predictions=PREDS,
-                        retune_request=state.get("retune_request_path"))
+                        retune_request=state.get("retune_request_path"), **extra)
         return {}
 
     def evaluate(state: PipelineState) -> dict:
@@ -301,7 +304,7 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None,
 
 def run(*, threshold=0.01, target_accuracy=0.60, max_iterations=5, patience=2,
         min_delta=0.01, sample_size=300, use_ollama=True, data_dir=None,
-        dataset_end=None) -> dict:
+        dataset_end=None, epochs=None) -> dict:
     """Build the pipeline with real agents and run it once end to end, returning the
     final graph state. This is the entry point `main.py` calls."""
     from langgraph.checkpoint.memory import MemorySaver
@@ -310,7 +313,7 @@ def run(*, threshold=0.01, target_accuracy=0.60, max_iterations=5, patience=2,
                           patience=patience, min_delta=min_delta, sample_size=sample_size,
                           use_ollama=use_ollama)
     graph = build_pipeline(agents, threshold=threshold, data_dir=data_dir,
-                           dataset_end=dataset_end,
+                           dataset_end=dataset_end, epochs=epochs,
                            sample_size=sample_size, checkpointer=MemorySaver())
     return graph.invoke(
         {"retune_request_path": None},
