@@ -27,8 +27,6 @@ class PipelineState(TypedDict, total=False):
     # ── Handoff 2: Classifier → Evaluator ───────────────────────────────────
     # docs/data_contracts.md §Handoff 2
     # Prof note: Sabina gets code + results, not only predictions CSV
-    llm_fn: object              # optional injected LLM callable used by the classifier's
-                                # agentic code-gen (tests pass a fake; None = real Ollama)
     predictions_path: str       # absolute path to predictions_test.csv
 
     # ── Fine-tuning (ADR 0001): Nadi owns training, not a separate agent ────

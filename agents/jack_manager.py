@@ -93,21 +93,21 @@ def _weak_heads(report: dict, floor: float) -> list[str]:
     """Which directional head(s) Nadi should retrain this pass (ADR 0001: Jack
     decides WHETHER/WHICH, Nadi decides HOW).
 
-    A specifically collapsed head takes priority over Sabina's general
-    `focus_labels` — collapse is a sharper, more urgent signal than "weakest
-    within a margin", so it wins outright when both are available. Otherwise
-    falls back to Sabina's `proposal.focus_labels`, filtered to the two heads
-    that actually have a checkpoint to retrain (`neutral` has none).
+    Union of two signals: any specifically collapsed head, plus whichever
+    head(s) Sabina's `proposal.focus_labels` names (filtered to the two heads
+    that actually have a checkpoint to retrain — `neutral` has none). A
+    collapsed head never suppresses a DIFFERENT head that's independently
+    flagged weak — each head's own retrain schedule must be able to progress
+    regardless of the other head's collapse status.
 
     Never empty during a retune: if neither signal names a directional head
     (e.g. focus_labels names only `neutral`), retrain both heads rather than
     sending Nadi a retune with nothing to actually retune — an empty list
     would burn an iteration with zero chance of changing the result."""
     collapsed = _collapsed_heads(report, floor)
-    if collapsed:
-        return collapsed
     focus_labels = report.get("proposal", {}).get("focus_labels", [])
-    heads = [head for head in HEADS if head in focus_labels]
+    from_focus = [head for head in HEADS if head in focus_labels]
+    heads = [head for head in HEADS if head in collapsed or head in from_focus]
     return heads or list(HEADS)
 
 

@@ -3,10 +3,10 @@
   "reason": "accuracy 0.54 below target 0.60",
   "current_accuracy": 0.54,
   "target_accuracy": 0.60,
-  "focus_labels": [
-    "neutral",
+  "heads_to_retrain": [
     "down"
   ],
+  "collapsed_heads": [],
   "misclassified_ids": [
     "FNSPID_00006",
     "FNSPID_00010",
@@ -14,11 +14,5 @@
     "FNSPID_00012",
     "FNSPID_00004",
     "FNSPID_00002"
-  ],
-  "suggested_params": {
-    "threshold": 0.5,
-    "max_length": 128,
-    "boost_factor": 1.25
-  },
-  "code_notes": "threshold hardcoded at 0.5 in classifier.py"
+  ]
 }

@@ -105,6 +105,31 @@ def test_once_both_trained_only_the_flagged_head_retrains():
     assert _heads_needing_training(requested=[], already_trained=already) == set()
 
 
+def test_fine_tune_trains_at_the_same_max_length_the_classifier_infers_at(monkeypatch):
+    """train_finbert's max_length must match CLASSIFIER_TEMPLATE's MAX_LENGTH --
+    otherwise every head trains truncated at one length while inference
+    truncates at another."""
+    import agents.nadi_classifier as nc
+
+    captured = {}
+
+    def fake_train_finbert(**kwargs):
+        captured.update(kwargs)
+        return {"model_dir": kwargs["out_dir"],
+                "report": {"val_class_accuracy": {kwargs["head"]: 0.5}}}
+
+    monkeypatch.setattr(nc, "train_finbert", fake_train_finbert)
+
+    nc.fine_tune({
+        "processed_data_path": "mock_data/processed_data.csv",
+        "finetuned_base_dir": "/tmp/does-not-matter",
+        "heads_to_retrain": ["up"], "collapsed_heads": [],
+        "up_model_dir": None, "down_model_dir": None,
+    })
+
+    assert captured["max_length"] == nc.MAX_LENGTH
+
+
 # --- fine_tune node (integration; trains real tiny checkpoints) ---------------
 #
 # train_finbert's val split needs at least one row of a head's own class AND

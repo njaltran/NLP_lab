@@ -263,6 +263,15 @@ def test_weak_heads_prioritizes_a_collapsed_head_over_focus_labels():
     assert jm._weak_heads(report, 0.05) == ["up"]
 
 
+def test_weak_heads_unions_a_collapsed_head_with_an_independently_flagged_one():
+    """A collapsed head must not silently suppress a DIFFERENT head Sabina
+    independently flagged as weak -- each head's own schedule should be able
+    to progress regardless of the other head's collapse status."""
+    report = {"class_accuracy": {"up": 0.0, "down": 0.30, "neutral": 0.6},
+              "proposal": {"focus_labels": ["down"]}}
+    assert set(jm._weak_heads(report, 0.05)) == {"up", "down"}
+
+
 def test_collapsed_heads_lists_only_heads_below_floor():
     report = {"class_accuracy": {"up": 0.0, "down": 0.40, "neutral": 0.95}}
     assert jm._collapsed_heads(report, 0.05) == ["up"]

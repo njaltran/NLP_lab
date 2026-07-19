@@ -36,6 +36,12 @@ _COMBINE_BINARY_PROBS_SOURCE = inspect.getsource(combine_binary_probs)
 
 OUTPUT_DIR = "outputs"
 
+# Shared between training and inference: fine_tune() trains each head at this
+# length and CLASSIFIER_TEMPLATE tokenizes at the same length at inference.
+# Pinned, not retune-tunable (ADR 0003) -- a mismatch here would train one
+# truncation and infer at another.
+MAX_LENGTH = 128
+
 # --- Per-head fine-tuning hyperparameter schedule (ADR 0001) -------------------
 # Nadi, not Manager, picks these now: given one directional head's own prior
 # retune attempts, choose the next learning rate and focus weight. Values
@@ -128,6 +134,7 @@ def fine_tune(state: PipelineState) -> dict:
             learning_rate=params["learning_rate"],
             focus_weight_multiplier=params["focus_weight_multiplier"],
             parent_model_dir=state.get(f"{head}_model_dir"),
+            max_length=MAX_LENGTH,
         )
         own_accuracy = result["report"]["val_class_accuracy"].get(head, 0.0)
         previous_accuracy = history[-1].get("val_class_accuracy") if history else None
@@ -266,7 +273,6 @@ def generate_code(state: PipelineState) -> dict:
     time knob to nudge; the weights are the only thing retuning changes.
     """
     threshold = 0.5
-    max_length = 128
 
     code_path = state.get("classifier_code_path") or os.path.join(OUTPUT_DIR, "classifier.py")
     os.makedirs(os.path.dirname(code_path) or ".", exist_ok=True)
@@ -284,7 +290,7 @@ def generate_code(state: PipelineState) -> dict:
         up_model_dir=repr(up_model_dir),
         down_model_dir=repr(down_model_dir),
         threshold=threshold,
-        max_length=max_length,
+        max_length=MAX_LENGTH,
         combine_binary_probs_source=_COMBINE_BINARY_PROBS_SOURCE,
     )
 
@@ -307,7 +313,7 @@ def generate_code(state: PipelineState) -> dict:
     metadata = {
         "model_name": (f"{up_model_dir}, {down_model_dir}"
                        if up_model_dir and down_model_dir else "ProsusAI/finbert"),
-        "fine_tuning_params": {"threshold": threshold, "max_length": max_length},
+        "fine_tuning_params": {"threshold": threshold, "max_length": MAX_LENGTH},
     }
 
     return {
