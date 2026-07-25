@@ -1,0 +1,31 @@
+[
+  {
+    "model_dir": "outputs/finbert_loop_finetuned",
+    "train_loss": 1.1511,
+    "val_accuracy": 0.2886,
+    "val_class_accuracy": {
+      "up": 0.0989,
+      "down": 0.8725,
+      "neutral": 0.0246
+    },
+    "started_from": "ProsusAI/finbert",
+    "focus_labels": [
+      "up",
+      "down"
+    ]
+  },
+  {
+    "model_dir": "outputs/finbert_loop_finetuned",
+    "train_loss": 1.0638,
+    "val_accuracy": 0.3568,
+    "val_class_accuracy": {
+      "up": 0.5589,
+      "down": 0.1195,
+      "neutral": 0.3743
+    },
+    "started_from": "outputs/finbert_loop_finetuned",
+    "focus_labels": [
+      "up"
+    ]
+  }
+]
