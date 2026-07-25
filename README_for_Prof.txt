@@ -121,7 +121,8 @@ experiment_finetuning_in_loop/
                            loop, kept separate so the submitted pipeline stays
                            as it was during the project. It has its own README
                            and writes its own outputs; nothing in agents/ or
-                           main.py is changed by it.
+                           main.py is changed by it to keep it truthful to what 
+                           was actually shown on July 7th.
 
 mock_data/                 small valid sample of every handoff file (used by tests)
 tests/                     pytest suite

@@ -318,7 +318,8 @@ horizons, none beat the majority-class baseline. Full analysis:
    retune only adjusts inference settings (`threshold`, `boost_factor`) on fixed
    weights — so the loop can reshuffle predictions but never actually learns from the
    evaluator's feedback. Making every retune a fine-tuning pass on the weakest class
-   would close that gap and turn the loop into genuine iterative training. This was also included in the prototype about two directional heads, but because it involves a much bigger PR changing a lot of the context of the project, we also decided not to include it in submission.
+   would close that gap and turn the loop into genuine iterative training. This was also included in the prototype about two directional heads, but because it involves a much bigger PR changing a lot of the context of the project, we also decided not to include it in submission - > instead we tried a smaller scale change involving 
+   only the classifier to add fine tuning to the loop (see experiment_finetuning_in_loop).
 8. **Reject low confidence — we trade coverage for precision.** As we mentioned in the presentation during the dashboard, 
   the model's confidence turns out to be informative: filtering to only its more confident predictions
    raises accuracy sharply. Measured on the committed test set:
