@@ -68,7 +68,7 @@ extra setup. To generate real LLM explanations instead, install
 **Data (included).** Both inputs ship with the repo: the raw headlines
 (`data/fnspid_raw.csv`) and the cached price history (`data/price_cache.pkl`). No
 yfinance download is needed, and the cache keeps results reproducible since yfinance
-can return revised history over time. Delete the cache to re-fetch prices live (we did this for you to save time to run)
+can return revised history over time. Delete the cache to re-fetch prices live.
 
 **Results (included).** [`outputs/`](./outputs) holds the artifacts of a completed
 end-to-end run, so the results can be inspected and graded without running anything.
@@ -108,6 +108,19 @@ uv run main.py --no-ollama --model-dir outputs/finbert_finetuned --dataset-end 2
 uv run python -m pytest tests/ -q
 ```
 
+### View the dashboard
+
+The dashboard we presented in class is a [marimo](https://marimo.io) app, so it needs
+`marimo run` — plain `python dashboard.py` will not open it:
+
+```bash
+uv run marimo run dashboard.py     # the presentation view
+uv run marimo edit dashboard.py    # editable/interactive version
+```
+
+It reads the committed contract files in `outputs/` and shows the results as charts,
+including the confidence-vs-accuracy trade-off discussed in [Future work](#future-work).
+
 ---
 
 ## Repository map
@@ -143,7 +156,7 @@ agents/
 
 data/
   fnspid_raw.csv           raw news headlines (committed)
-  price_cache.pkl          cached yfinance prices (generated on first run, committed for submission)
+  price_cache.pkl          cached yfinance prices (generated on first run usually, status now: committed for submission)
   processed_data.csv       Aurora's output (generated)
 
 outputs/                   committed results of a real end-to-end run
@@ -232,7 +245,7 @@ COVID period excluded (`--dataset-end 2019-12-31`):
 always-guessing-neutral (0.516) — because neutral is 52% of the test set, so that one
 class carries the score. On **balanced accuracy**, which weights all three classes
 equally and therefore cannot be gamed by the majority class, the model scores **0.39
-against a 0.333 chance baseline** — a real but modest improvement, earned by the up
+against a 0.333 chance baseline** — modest improvement, earned by the up
 (0.36) and down (0.05) predictions that always-neutral scores 0.00 on.
 
 The consistent finding across every architecture and hyperparameter setting we tried:
@@ -273,9 +286,9 @@ horizons, *none* beat the majority-class baseline. Full analysis:
    warmup or decay, which is a known accelerant for overfitting.
 5. **Add non-text features.** Price momentum, volume, and volatility carry signal that
    headlines alone do not.
-6. **Split the classifier into two directional heads.** Instead of one model choosing
-   between three classes, train **two independent binary models** — an `up`-head
-   (`up` vs `neutral`) and a `down`-head (`down` vs `neutral`) — and recombine their
+6. **Split the classifier into two directional heads.** From notes following our presentation discussion, 
+  Instead of one model choosing between three classes, train **two independent binary models** — an `up`-head
+   (`up` vs `neutral`) and a `down`-head (`down` vs `neutral`). Then we recombine their
    outputs into a three-way distribution, where `neutral` is the probability mass left
    over when neither head fires:
 
@@ -286,26 +299,17 @@ horizons, *none* beat the majority-class baseline. Full analysis:
 
    The motivation is our weakest result: `down` recall of 0.05. In a single 3-class
    model, `down` competes against both other classes at once and loses. Giving it a
-   dedicated binary model — trained **only** on `down` and `neutral` rows, never seeing
-   `up` at all — removes that competition and should sharpen the decision boundary the
+   dedicated binary model, trained **only** on `down` and `neutral` rows, never seeing
+   `up` at all removes that competition and should sharpen the decision boundary the
    model actually struggles with.
 
-   The trade-off is deliberate and worth stating: because each head never sees the
-   opposite movement class during training, it can misfire confidently on inputs it was
-   never taught about. The alternative (one-vs-rest, where each head trains on every row
-   with the opposite class folded into "not this") avoids that risk but reintroduces a
-   fuzzy negative class — which is the dilution the split was meant to remove. If the
-   out-of-distribution risk proves worse in practice, one-vs-rest is the fallback.
-
-   Prototyped by the Manager's owner in an open pull request; **not yet validated on our
-   data**, so no accuracy claim is made here.
+   With the extra days for submission, the Manager's owner tried to prototype it in an open pull request in our project repo.
+   **not yet validated on our data as it would take a long time**, so no accuracy claim is made here -> just a future improvement idea.
 7. **Fine-tune inside the retune loop.** Today training happens once, offline, and each
    retune only adjusts inference settings (`threshold`, `boost_factor`) on fixed
    weights — so the loop can reshuffle predictions but never actually *learns* from the
    evaluator's feedback. Making every retune a fine-tuning pass on the weakest class
-   would close that gap and turn the loop into genuine iterative training. The cost is
-   runtime: each cycle becomes a training run rather than fast inference, and the loop
-   would need a guard against publishing a model that still has a collapsed class.
+   would close that gap and turn the loop into genuine iterative training. This was also included in the prototype about two directional heads, but because it involves a much bigger PR changing a lot of the context of the project, we also decided not to include it in submission.
 8. **Reject low confidence — we trade coverage for precision.** As we mentioned in the presentation during the dashboard, 
   the model's confidence turns out to be *informative*: filtering to only its more confident predictions
    raises accuracy sharply. Measured on the committed test set:
