@@ -13,9 +13,6 @@ and is fast. Keeping them apart means the loop never retrains.
 Run:
     uv run agents/finetune_finbert.py --data data/processed_data.csv
     uv run agents/finetune_finbert.py --data data/processed_data.csv --limit 50   # quick smoke test
-
-Design notes: docs/study_guide.md (Classifier section) explains why we expect a
-weak result here — the signal in one headline is thin.
 """
 
 import argparse

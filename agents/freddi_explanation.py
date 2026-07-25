@@ -8,11 +8,6 @@ interface (`agents/base.py`) so the Manager can trigger it with `.run()`.
 
 Contract: docs/data_contracts.md, Handoffs 4 (input) and 5 (output).
 
-Input columns  : article_id, article_title, predicted_label, actual_label,
-                 confidence, prob_up, prob_down, prob_neutral
-Output columns : article_id, article_title, predicted_label, actual_label,
-                 confidence, explanation, manual_score
-
 Design notes:
   - **Option A** — the model explains the prediction from the HEADLINE only; it is
     never shown the actual next-day outcome (mirrors real prediction time and keeps

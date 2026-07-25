@@ -1,22 +1,12 @@
-"""Sabina's Evaluator Agent.
+"""
+Evaluator Agent
+Owner: Sabina
 
-Runs after the Classifier Agent and before the Manager. It does not train
-anything and makes no predictions of its own: it checks the classifier's output,
-computes the metrics, and writes the report the Manager decides from.
-
-Reads `predictions_test.csv`, plus `classifier.py` as text so it can note things
-like the threshold that produced those predictions. Writes
-`evaluation_report.json` — metrics and a `retune`/`proceed` recommendation. The
-Manager still makes the final call. Exact fields: docs/data_contracts.md,
-Handoff 3.
-
-Two things worth knowing about how it scores:
-
-- The metrics and the recommendation are rule-based. The optional LLM only
-  rewords the explanation text; it cannot change a metric, the action, the focus
-  labels or the suggested parameters.
-- Scoring is split-aware. Retune cycles score the `val` rows and the final report
-  scores `test`, so the test set stays untouched until the very end.
+Reads predictions_test.csv and the generated classifier.py, scores them, and
+writes evaluation_report.json — the metrics plus a retune/proceed proposal the
+Manager decides from. Metrics and the proposal are rule-based; the optional LLM
+only rewords the explanation text. Scoring is split-aware: retunes score `val`,
+the final report scores `test`.
 
 Exports
 -------
@@ -25,6 +15,8 @@ build_report     pure report builder, used by the graph and by the tests
 
 Usage (standalone test):
     python agents/sabina_evaluator.py
+
+See docs/data_contracts.md (Handoff 3).
 """
 
 import json
@@ -587,23 +579,11 @@ def build_report(
     llm_fn: Callable[[str], str] | None = None,
     eval_split: str = "test",
 ) -> dict:
-    """Build the complete Evaluator report for the Manager Agent.
+    """Build the complete `evaluation_report.json` object for the Manager.
 
-    Parameters
-    ----------
-    rows:
-        Prediction rows from the Classifier Agent.
-    code_text:
-        Generated classifier source code.
-    llm_fn:
-        Optional function used for LLM review in tests or demos.
-    eval_split:
-        Split to score: `val` during retuning and `test` for final evaluation.
-
-    Returns
-    -------
-    dict
-        Full content of `evaluation_report.json`.
+    `eval_split` picks which held-out rows to score: `val` during retune cycles,
+    `test` for the final report only. `llm_fn` injects a stand-in LLM for tests
+    and demos; left None it uses the real one, or none at all when the LLM is off.
     """
     rows = _select_split(rows, eval_split)
     validate_predictions(rows)
@@ -702,21 +682,11 @@ class EvaluatorAgent(Agent):
         return build_graph(checkpointer)
 
     def run(self, predictions: str, classifier_code: str, eval_split: str = "test") -> dict:
-        """Run the Evaluator Agent.
+        """Score `predictions` against the contract and write the report.
 
-        Parameters
-        ----------
-        predictions:
-            Path to the Classifier Agent's prediction CSV.
-        classifier_code:
-            Path to the generated `classifier.py`.
-        eval_split:
-            Split to score: `val` for retuning or `test` for final evaluation.
-
-        Returns
-        -------
-        dict
-            Final LangGraph state, including the path to `evaluation_report.json`.
+        `eval_split` picks which held-out rows to score: `val` during retune
+        cycles, `test` for the final report only. Returns the final graph state,
+        which carries the path to `evaluation_report.json`.
         """
         output_path = os.path.join(self._output_dir, "evaluation_report.json")
         return self._invoke({
