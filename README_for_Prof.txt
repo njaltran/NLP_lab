@@ -44,8 +44,10 @@ Without uv (uv is recommended though - more accurate versions used!!):
 Notes:
   --dataset-end 2019-12-31   Keeps the COVID crash out of the test set.
                              ALL REPORTED RESULTS USE THIS FLAG.
-  --no-ollama                Skips the local LLM used for explanations, so no
-                             extra setup is needed.
+  --no-ollama                Skips Freddi's explanation LLM, so no extra setup
+                             is needed. The other agents' LLMs are separate
+                             switches and are off by default, so a plain run is
+                             fully deterministic.
 
 The data ships with the submission (data/fnspid_raw.csv and the price cache),
 so no yfinance download is needed. FinBERT itself (~440 MB) downloads from

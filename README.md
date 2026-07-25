@@ -69,7 +69,7 @@ uv run main.py --no-ollama --model-dir outputs/finbert_finetuned --dataset-end 2
 
 | Flag | Default | What it does |
 |---|---|---|
-| `--no-ollama` | off | Skip the LLM; use deterministic placeholder explanations |
+| `--no-ollama` | off | Skip Freddi's explanation LLM; write deterministic placeholder sentences instead |
 | `--dataset-end YYYY-MM-DD` | none | Drop rows after this date before splitting (e.g. `2019-12-31` excludes the COVID crash) |
 | `--target-accuracy` | `0.60` | The Manager's accuracy gate |
 | `--max-iterations` | `5` | Cap on retune cycles |
@@ -77,6 +77,14 @@ uv run main.py --no-ollama --model-dir outputs/finbert_finetuned --dataset-end 2
 | `--model-dir` | none | Load fine-tuned FinBERT weights instead of pretrained |
 | `--sample-size` | `300` | Rows sampled for explanation |
 | `--data-dir` | `data/` | Where `fnspid_raw.csv` lives |
+
+`--no-ollama` covers Freddi only. Three other agents can use an LLM, each behind its
+own switch and all **off by default**, so a plain run is fully deterministic:
+`EVALUATOR_USE_OLLAMA=true` lets Sabina reword her `reason`/`code_notes`,
+`CLASSIFIER_USE_OLLAMA=true` lets Nadi propose a rewritten `classify()`, and setting
+`HF_TOKEN` lets Jack write the rationale in `decision.json`. Only Nadi's can affect
+predictions, and anything it generates must pass a validation check or the template is
+kept — everywhere else the LLM writes prose and the rules decide.
 
 ### Run the tests
 
