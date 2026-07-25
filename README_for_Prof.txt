@@ -3,77 +3,15 @@ NLP LAB - PREDICTING STOCK MOVEMENT FROM FINANCIAL NEWS HEADLINES
 Team 2: Aurora, Freddi, Jack, Nadi, Sabina
 ===============================================================================
 
-Plain-text quick reference. 
+Quick reference. 
 The full documentation is in README.md (in VS Code, open it and press Cmd+Shift+V / Ctrl+Shift+V to render it).
 
+Immediate info to know: 
+- agents/ -> has our agents code
+- we have committed the outputs of our last run too in outputs/ so you don't have to run the pipeline (we had them .gitignored at first)
 
 -------------------------------------------------------------------------------
-1. SEE THE RESULTS WITHOUT RUNNING ANYTHING
--------------------------------------------------------------------------------
-
-Open:   outputs/final_report.json
-
-This is the real output of a completed run. Headline numbers:
-
-    test accuracy       0.50      (majority-class baseline: 0.516)
-    balanced accuracy   0.39      (chance baseline: 0.333)
-    per-class recall    up 0.36 / down 0.05 / neutral 0.76
-    test set            2,196 headlines
-    loop iterations     5
-
-Every test prediction with its generated explanation is in:
-        outputs/final_results.csv
-
-
--------------------------------------------------------------------------------
-2. RUN THE PIPELINE
--------------------------------------------------------------------------------
-
-Requires Python 3.13. Recommended: uv (https://docs.astral.sh/uv/)
-
-    uv sync
-    uv run main.py --no-ollama --dataset-end 2019-12-31
-
-Without uv (uv is recommended though - more accurate versions used!!):
-
-    python -m venv .venv
-    source .venv/bin/activate
-    pip install -r requirements.txt
-    python main.py --no-ollama --dataset-end 2019-12-31
-
-Notes:
-  --dataset-end 2019-12-31   Keeps the COVID crash out of the test set.
-                             ALL REPORTED RESULTS USE THIS FLAG.
-  --no-ollama                Skips Freddi's explanation LLM, so no extra setup
-                             is needed. The other agents' LLMs are separate
-                             switches and are off by default, so a plain run is
-                             fully deterministic.
-
-The data ships with the submission (data/fnspid_raw.csv and the price cache),
-so no yfinance download is needed. FinBERT itself (~440 MB) downloads from
-Hugging Face on the first run, so that run needs internet.
-
-
--------------------------------------------------------------------------------
-3. RUN THE TESTS
--------------------------------------------------------------------------------
-
-    uv run python -m pytest tests/ -q
-
-Expected: 72 passed.
-
-
--------------------------------------------------------------------------------
-4. VIEW THE DASHBOARD (shown in our presentation)
--------------------------------------------------------------------------------
-
-It is a marimo app, so "python dashboard.py" will NOT open it. Use:
-
-    uv run marimo run dashboard.py
-
-
--------------------------------------------------------------------------------
-5. FOLDER STRUCTURE
+1. FOLDER STRUCTURE
 -------------------------------------------------------------------------------
 
 main.py                    entry point: parses flags, runs the pipeline
@@ -128,6 +66,70 @@ experiment_finetuning_in_loop/
 
 mock_data/                 small valid sample of every handoff file (used by tests)
 tests/                     pytest suite
+
+-------------------------------------------------------------------------------
+2. SEE THE RESULTS WITHOUT RUNNING ANYTHING
+-------------------------------------------------------------------------------
+
+Open:   outputs/final_report.json
+
+This is the real output of a completed run. Headline numbers:
+
+    test accuracy       0.50      (majority-class baseline: 0.516)
+    balanced accuracy   0.39      (chance baseline: 0.333)
+    per-class recall    up 0.36 / down 0.05 / neutral 0.76
+    test set            2,196 headlines
+    loop iterations     5
+
+Every test prediction with its generated explanation is in:
+        outputs/final_results.csv
+
+
+-------------------------------------------------------------------------------
+3. RUN THE PIPELINE
+-------------------------------------------------------------------------------
+
+Requires Python 3.13. Recommended: uv (https://docs.astral.sh/uv/)
+
+    uv sync
+    uv run main.py --no-ollama --dataset-end 2019-12-31
+
+Without uv (uv is recommended though - more accurate versions used!!):
+
+    python -m venv .venv
+    source .venv/bin/activate
+    pip install -r requirements.txt
+    python main.py --no-ollama --dataset-end 2019-12-31
+
+Notes:
+  --dataset-end 2019-12-31   Keeps the COVID crash out of the test set.
+                             ALL REPORTED RESULTS USE THIS FLAG.
+  --no-ollama                Skips Freddi's explanation LLM, so no extra setup
+                             is needed. The other agents' LLMs are separate
+                             switches and are off by default, so a plain run is
+                             fully deterministic.
+
+The data ships with the submission (data/fnspid_raw.csv and the price cache),
+so no yfinance download is needed. FinBERT itself (~440 MB) downloads from
+Hugging Face on the first run, so that run needs internet.
+
+
+-------------------------------------------------------------------------------
+4. RUN THE TESTS
+-------------------------------------------------------------------------------
+
+    uv run python -m pytest tests/ -q
+
+Expected: 72 passed.
+
+
+-------------------------------------------------------------------------------
+5. VIEW THE DASHBOARD (shown in our presentation)
+-------------------------------------------------------------------------------
+
+It is a marimo app, so "python dashboard.py" will NOT open it. Use:
+
+    uv run marimo run dashboard.py
 
 
 -------------------------------------------------------------------------------
