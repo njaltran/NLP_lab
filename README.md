@@ -366,8 +366,32 @@ horizons, *none* beat the majority-class baseline. Full analysis:
    warmup or decay, which is a known accelerant for overfitting.
 5. **Add non-text features.** Price momentum, volume, and volatility carry signal that
    headlines alone do not.
-6. **Two-head architecture.** Separate binary `up`-vs-neutral and `down`-vs-neutral
-   models may sharpen per-class discrimination — prototyped, not yet validated.
+6. **Split the classifier into two directional heads.** Instead of one model choosing
+   between three classes, train **two independent binary models** — an `up`-head
+   (`up` vs `neutral`) and a `down`-head (`down` vs `neutral`) — and recombine their
+   outputs into a three-way distribution, where `neutral` is the probability mass left
+   over when neither head fires:
+
+   ```
+   raw = { up: p_up,  down: p_down,  neutral: (1 - p_up) * (1 - p_down) }
+   ```
+   normalised so the three sum to 1.
+
+   The motivation is our weakest result: `down` recall of 0.05. In a single 3-class
+   model, `down` competes against both other classes at once and loses. Giving it a
+   dedicated binary model — trained **only** on `down` and `neutral` rows, never seeing
+   `up` at all — removes that competition and should sharpen the decision boundary the
+   model actually struggles with.
+
+   The trade-off is deliberate and worth stating: because each head never sees the
+   opposite movement class during training, it can misfire confidently on inputs it was
+   never taught about. The alternative (one-vs-rest, where each head trains on every row
+   with the opposite class folded into "not this") avoids that risk but reintroduces a
+   fuzzy negative class — which is the dilution the split was meant to remove. If the
+   out-of-distribution risk proves worse in practice, one-vs-rest is the fallback.
+
+   Prototyped by the Manager's owner in an open pull request; **not yet validated on our
+   data**, so no accuracy claim is made here.
 7. **Fine-tune inside the retune loop.** Today training happens once, offline, and each
    retune only adjusts inference settings (`threshold`, `boost_factor`) on fixed
    weights — so the loop can reshuffle predictions but never actually *learns* from the
