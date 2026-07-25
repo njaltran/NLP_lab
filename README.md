@@ -61,13 +61,31 @@ python main.py --no-ollama
 extra setup. To generate real LLM explanations instead, install
 [Ollama](https://ollama.com), pull `llama3.2`, and drop the flag.
 
-**Runs offline.** Both inputs ship with the repo — the raw headlines
-(`data/fnspid_raw.csv`) and the cached price history (`data/price_cache.pkl`) — so
-no yfinance download is needed. The cache also keeps results reproducible, since
-yfinance can return revised history over time. Delete the cache to re-fetch prices.
+### What ships, and what is fetched
 
-FinBERT itself is downloaded from Hugging Face on first use (~440 MB, cached
-afterwards), so the very first pipeline run does need internet for that.
+**Data — included.** Both inputs ship with the repo: the raw headlines
+(`data/fnspid_raw.csv`) and the cached price history (`data/price_cache.pkl`). No
+yfinance download is needed, and the cache keeps results reproducible since yfinance
+can return revised history over time. Delete the cache to re-fetch prices live.
+
+**Results — included.** [`outputs/`](./outputs) holds the artifacts of a completed
+end-to-end run, so the results can be inspected and graded without running anything.
+
+**Model weights — not included, fetched or regenerated:**
+
+| | Size | How to get it |
+|---|---|---|
+| Pretrained FinBERT (`ProsusAI/finbert`) | ~440 MB | Downloads automatically from Hugging Face on first use, then cached locally. **The first run needs internet for this.** |
+| Our fine-tuned weights | ~420 MB | Not shipped, to keep the submission small. Regenerate by running the Processing agent first, then the fine-tuner (both seeded and reproducible) — see below. Results are logged in [`docs/finetune_runs.md`](./docs/finetune_runs.md). |
+
+Neither is required to inspect the committed results — only to re-run the pipeline
+yourself. To reproduce the fine-tuned weights:
+
+```bash
+uv run agents/aurora_processing.py --dataset-end 2019-12-31   # writes data/processed_data.csv
+uv run agents/finetune_finbert.py                             # writes outputs/finbert_finetuned/
+uv run main.py --no-ollama --model-dir outputs/finbert_finetuned --dataset-end 2019-12-31
+```
 
 ### Useful flags
 
