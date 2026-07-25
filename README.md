@@ -108,13 +108,6 @@ uv run main.py --no-ollama --model-dir outputs/finbert_finetuned --dataset-end 2
 uv run python -m pytest tests/ -q
 ```
 
-### Inspect results without running anything
-
-Every file in [`outputs/`](./outputs) is committed from a real end-to-end run.
-Start with [`outputs/final_report.json`](./outputs/final_report.json) for the headline
-metrics, or [`outputs/final_results.csv`](./outputs/final_results.csv) for every test
-prediction alongside its generated explanation.
-
 ---
 
 ## Repository map
@@ -125,9 +118,9 @@ prediction alongside its generated explanation.
 |---|---|---|
 | 1 | [`main.py`](./main.py) | Entry point. It parses flags, invokes the pipeline graph |
 | 2 | [`agents/pipeline_graph.py`](./agents/pipeline_graph.py) | **The orchestration.** All five agents wired into one LangGraph with the retune cycle |
-| 3 | [`agents/`](./agents) | One module per agent (see [The five agents](#the-five-agents)) |
+| 3 | [`agents/`](./agents) | One module per agent, each owned by one team member |
 | 4 | [`outputs/`](./outputs) | **Committed results** from a real run. You can use to inspect without running anything |
-| 5 | [`docs/architecture.md`](./docs/architecture.md) · [`docs/data_contracts.md`](./docs/data_contracts.md) | The design rationale and the exact format of every file agents exchange |
+| 5 | [`docs/`](./docs) | Design rationale, data contracts, and the EDA notebook (table below) |
 
 ### Full structure
 
@@ -201,107 +194,21 @@ flowchart TD
     manager -->|finalize| final
 ```
 
-**The loop.** The Manager gates on accuracy. Below target it writes a
-`retune_request.json` and sends Nadi back around; once the target clears, accuracy
-plateaus (convergence early-stop), or the 5-iteration cap forces it, it samples rows
-for Freddi and joins the explanations into the final outputs. Each retune escalates
-the classifier's settings rather than repeating, so the loop explores instead of
-spinning.
-
-The whole thing is **one compiled LangGraph** ([`agents/pipeline_graph.py`](./agents/pipeline_graph.py))
-whose retune loop is a graph *cycle* (`gate → classify → evaluate → gate`). `main.py` only loads secrets, parses flags, and invokes the graph.
-
 ![LangGraph pipeline graph](./docs/pipeline_graph.png)
 
-### How the loop protects itself
+### Design decisions
 
-A naive retune loop fails in predictable ways: it repeats the same attempt, it accepts
-a degenerate model, or it finishes on a worse iteration than one it already had. The
-Manager has a specific safeguard for each — this is the most engineered part of the
-system, so it is worth reading [`agents/jack_manager.py`](./agents/jack_manager.py) and
-[`docs/retune_loop.md`](./docs/retune_loop.md) alongside this list.
+The choices that shape the results, and why each was made:
 
-| Failure mode | Safeguard |
+| Decision | Why |
 |---|---|
-| The loop re-proposes the same settings and gets the same result | **Escalating retune schedule** — each cycle picks the first parameter set *not already tried*, comparing only the keys both sets share, so an "identical" classifier can't slip through |
-| A degenerate model looks good on aggregate accuracy | **Class-collapse floor** — if any class's recall falls below `min_class_accuracy` (0.05), the gate refuses to treat it as cleared, so an all-neutral run cannot fake a pass |
-| A class is absent from a scoring window, and looks like a collapse | Sabina reports **per-class support**, so zero rows is distinguishable from zero skill |
-| An escalation overshoots and accuracy drops | **Revert-and-perturb** — on a regression beyond 0.05 the Manager returns to the *best* iteration's settings and moves one knob one step, instead of escalating further |
-| The loop finalises on a pass worse than an earlier one | **`select_best`** — each new-best iteration is snapshotted, and the best is restored before explanation and the final report |
-| The loop never terminates, or burns its whole budget on a plateau | **Convergence early-stop** (`patience` / `min_delta`) plus a hard iteration cap |
-| A previous run's files contaminate a new one | **`clean_outputs()`** wipes loop artifacts before each run, while keeping expensive ones (fine-tuned weights, fine-tune reports) |
-| The loop tunes itself against the final measurement | Retunes are scored on **`val`**; `test` is scored exactly once, at the end |
-
-The gate itself is deterministic throughout. An LLM writes only the human-readable
-rationale in `decision.json`, and it is given the accuracy trend and the collapsed
-class so its explanation is grounded in the same numbers the rules used.
-
----
-
-## The five agents
-
-Every agent is a LangGraph behind a single `.run()` method
-([`agents/base.py`](./agents/base.py)), so the pipeline can invoke any of them
-identically and each stays independently testable.
-
-### 1. Processing — Aurora
-Joins FNSPID headlines to yfinance prices, computes the next-trading-day percentage
-change, labels each row, and assigns a leak-free split.
-- **Reads:** `data/fnspid_raw.csv`, yfinance
-- **Writes:** `data/processed_data.csv`
-- **Code:** [`agents/aurora_processing.py`](./agents/aurora_processing.py) · **How the label band and outlier fences were chosen:** [EDA notebook](./docs/processing_experiments.ipynb)
-- **Key choices:** ±1% label band; outliers trimmed at the 1st–99th percentile;
-  **split by date** (train on the past, test on the future);
-  `val` = last 10% of training dates so the loop can tune without touching `test`.
-
-### 2. Classifier — Nadi
-A **code-generation** agent: it writes `classifier.py` as a standalone script, runs it,
-and hands both the code *and* the predictions downstream.
-- **Reads:** `processed_data.csv`, `retune_request.json`
-- **Writes:** `classifier.py`, `predictions_test.csv`
-- **Code:** [`agents/nadi_classifier.py`](./agents/nadi_classifier.py)
-- **Key choices:** predicts held-out rows only (never training rows); pretrained or
-  fine-tuned FinBERT (opt-in via `--model-dir`); each retune adjusts inference settings
-  (`threshold`, `boost_factor`) on fixed weights — training happens once, offline.
-
-### 3. Evaluator — Sabina
-Scores the classifier's output and proposes the next action. It does **not** train
-anything or produce predictions.
-- **Reads:** `predictions_test.csv`, `classifier.py` (as text)
-- **Writes:** `evaluation_report.json`
-- **Code:** [`agents/sabina_evaluator.py`](./agents/sabina_evaluator.py)
-- **Internal graph:** `load_inputs → evaluate → write_report`
-- **Report contains:** overall accuracy, per-class accuracy, **class support**,
-  misclassified count and ids, a `retune`/`proceed` recommendation, and short
-  reason/code notes.
-- **Key choices:** scores `val` during the loop and `test` exactly once at the end, so
-  the loop cannot overfit the final measurement; reports **per-class support** so a
-  label missing from a split is never mistaken for model collapse; flags class collapse
-  explicitly. Metrics and the recommendation are deterministic — an optional LLM may
-  only reword the human-readable fields, never change a number or a decision.
-
-### 4. Manager — Jack
-The orchestrator and the gate: it decides whether to retune or proceed, and assembles
-the final deliverables.
-- **Reads:** `evaluation_report.json`, `predictions_test.csv`, `explanations.csv`
-- **Writes:** `decision.json`, `retune_request.json`, `sample_for_explanation.csv`,
-  `final_results.csv`, `final_report.json`
-- **Code:** [`agents/jack_manager.py`](./agents/jack_manager.py) · **Details:** [`docs/retune_loop.md`](./docs/retune_loop.md)
-- **Key choices:** the gate is **pure rules** (an LLM only writes the rationale);
-  a collapsed class cannot clear the gate, so an "always neutral" run can't fake a pass;
-  if a retune makes things worse it reverts to the best settings and nudges gently; the
-  pipeline finalises on the **best** iteration, not the last; it always terminates
-  (convergence or iteration cap).
-
-### 5. Explanation — Freddi
-Generates a one-sentence plain-English justification for each sampled prediction.
-- **Reads:** `sample_for_explanation.csv`
-- **Writes:** `explanations.csv`
-- **Code:** [`agents/freddi_explanation.py`](./agents/freddi_explanation.py)
-- **Key choices:** explains from the **headline only** — it never sees the true outcome,
-  so it cannot rationalise backwards; low temperature (0.3) for grounded, consistent
-  wording; falls back to a deterministic placeholder if the LLM is unavailable, so the
-  pipeline never crashes.
+| **±1% label band** — `up` above +1%, `down` below −1%, else `neutral` | Derived from the price-change distribution in the [EDA notebook](./docs/processing_experiments.ipynb); the same 0.01 cutoff used by Jiang & Zeng |
+| **Split by date, never randomly** | A model predicting the future must train on the past and be tested on a future it has never seen — a random split would leak future information |
+| **`val` = last 10% of the training dates** | The retune loop scores itself on `val`, so `test` stays untouched until the final report and the loop cannot overfit its own measurement |
+| **Classifier predicts held-out rows only** | Training rows were already seen by the model; scoring them would inflate accuracy |
+| **Explanations from the headline only** | Freddi never sees the true outcome, so it cannot rationalise backwards from the answer — it explains at prediction time, like a real system would |
+| **The gate is pure rules; the LLM writes only prose** | Every control decision (retune vs proceed, which settings to try, the metrics) must be reproducible and auditable; a stochastic model cannot be allowed to flip them |
+| **Outliers trimmed at the 1st–99th percentile** | Stock returns are fat-tailed, so the usual IQR×1.5 rule discarded ~10% of the data; percentile fences keep exactly 98% regardless of distribution shape |
 
 ---
 
