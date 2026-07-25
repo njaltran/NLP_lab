@@ -41,11 +41,9 @@ uv run main.py --no-ollama --dataset-end 2019-12-31      # run the full pipeline
 
 **Why `--dataset-end 2019-12-31`?** It drops rows after that date, keeping the COVID
 crash out of the data. Our dataset runs to mid-2020, and because the split is by date
-the 2020 crash would otherwise land entirely in the *test* set — so we would be
-measuring accuracy on a once-in-a-generation market shock rather than a normal regime.
-**All reported results below use this flag**, so include it to reproduce them
-(11,067 rows → 7,991 train / 880 val / 2,196 test). Omit it to run on the full
-dataset instead (2,930 test rows).
+the 2020 crash would otherwise land entirely in the *test* set.
+**All reported results below use this flag**, so it's important to include it to reproduce them
+(11,067 rows → 7,991 train / 880 val / 2,196 test).
 
 <details>
 <summary>Alternative: plain pip</summary>
@@ -125,22 +123,22 @@ prediction alongside its generated explanation.
 
 | # | Path | What it is |
 |---|---|---|
-| 1 | [`main.py`](./main.py) | Entry point — parses flags, invokes the pipeline graph |
+| 1 | [`main.py`](./main.py) | Entry point. It parses flags, invokes the pipeline graph |
 | 2 | [`agents/pipeline_graph.py`](./agents/pipeline_graph.py) | **The orchestration.** All five agents wired into one LangGraph with the retune cycle |
 | 3 | [`agents/`](./agents) | One module per agent (see [The five agents](#the-five-agents)) |
-| 4 | [`outputs/`](./outputs) | **Committed results** from a real run — inspect without running anything |
+| 4 | [`outputs/`](./outputs) | **Committed results** from a real run. You can use to inspect without running anything |
 | 5 | [`docs/architecture.md`](./docs/architecture.md) · [`docs/data_contracts.md`](./docs/data_contracts.md) | The design rationale and the exact format of every file agents exchange |
 
 ### Full structure
 
 ```
 main.py                    entry point (CLI flags → pipeline)
-dashboard.py               marimo dashboard
+dashboard.py               marimo dashboard (we showed this in the presentation)
 
 agents/
   pipeline_graph.py        the unified LangGraph: nodes, edges, retune cycle
   base.py                  shared Agent base class (build_graph + run)
-  state.py                 PipelineState — the shared state passed between nodes
+  state.py                 PipelineState - the shared state passed between nodes
   contracts.py             one definition of every handoff file format
   env.py                   .env loading
   aurora_processing.py     1. Processing agent
@@ -152,7 +150,7 @@ agents/
 
 data/
   fnspid_raw.csv           raw news headlines (committed)
-  price_cache.pkl          cached yfinance prices (generated on first run)
+  price_cache.pkl          cached yfinance prices (generated on first run, committed for submission)
   processed_data.csv       Aurora's output (generated)
 
 outputs/                   committed results of a real end-to-end run
@@ -165,25 +163,19 @@ outputs/                   committed results of a real end-to-end run
 
 mock_data/                 small valid sample of every handoff file (used by tests)
 tests/                     pytest suite
-docs/                      design docs and per-agent notebooks (see below)
+docs/                      design docs + the EDA notebook (see below)
 ```
 
 ### Documentation
 
 | File | Contents |
 |---|---|
-| [`docs/architecture.md`](./docs/architecture.md) | **Start here.** System design, agent roles, evaluation axes |
+| [`docs/architecture.md`](./docs/architecture.md) | System design, agent roles, evaluation axes |
 | [`docs/data_contracts.md`](./docs/data_contracts.md) | Exact columns/types of every handoff file |
+| [`docs/processing_experiments.ipynb`](./docs/processing_experiments.ipynb) | **EDA and threshold calibration** — how the ±1% label band and the 1st–99th percentile outlier fences were derived from the data (with plots) |
 | [`docs/retune_loop.md`](./docs/retune_loop.md) | How the feedback loop adapts across iterations |
 | [`docs/finetune_runs.md`](./docs/finetune_runs.md) | Fine-tuning experiments and the overfitting finding |
 | [`docs/experiments/`](./docs/experiments) | Metric-optimisation experiment write-up |
-
-**Per-agent code walkthroughs (notebooks):**
-[Processing](./docs/aurora_processing_guide.ipynb) ·
-[Processing EDA](./docs/processing_experiments.ipynb) ·
-[Classifier](./docs/nadi_classifier_guide.ipynb) ·
-[Evaluator](./docs/sabina_evaluator_guide.ipynb) ·
-[Explanation](./docs/explanation_agent_walkthrough.ipynb)
 
 ---
 
@@ -235,7 +227,7 @@ Joins FNSPID headlines to yfinance prices, computes the next-trading-day percent
 change, labels each row, and assigns a leak-free split.
 - **Reads:** `data/fnspid_raw.csv`, yfinance
 - **Writes:** `data/processed_data.csv`
-- **Code:** [`agents/aurora_processing.py`](./agents/aurora_processing.py) · **Guide:** [notebook](./docs/aurora_processing_guide.ipynb)
+- **Code:** [`agents/aurora_processing.py`](./agents/aurora_processing.py) · **How the label band and outlier fences were chosen:** [EDA notebook](./docs/processing_experiments.ipynb)
 - **Key choices:** ±1% label band; outliers trimmed at the 1st–99th percentile;
   **split by date, never randomly** (train on the past, test on the future);
   `val` = last 10% of training dates so the loop can tune without touching `test`.
@@ -245,7 +237,7 @@ A **code-generation** agent: it writes `classifier.py` as a standalone script, r
 and hands both the code *and* the predictions downstream.
 - **Reads:** `processed_data.csv`, `retune_request.json`
 - **Writes:** `classifier.py`, `predictions_test.csv`
-- **Code:** [`agents/nadi_classifier.py`](./agents/nadi_classifier.py) · **Guide:** [notebook](./docs/nadi_classifier_guide.ipynb)
+- **Code:** [`agents/nadi_classifier.py`](./agents/nadi_classifier.py)
 - **Key choices:** predicts held-out rows only (never training rows); pretrained or
   fine-tuned FinBERT (opt-in via `--model-dir`); each retune adjusts inference settings
   (`threshold`, `boost_factor`) on fixed weights — training happens once, offline.
@@ -255,7 +247,7 @@ Scores the classifier's output and proposes the next action. It does **not** tra
 anything or produce predictions; it is the quality-control step.
 - **Reads:** `predictions_test.csv`, `classifier.py` (as text)
 - **Writes:** `evaluation_report.json`
-- **Code:** [`agents/sabina_evaluator.py`](./agents/sabina_evaluator.py) · **Guide:** [notebook](./docs/sabina_evaluator_guide.ipynb)
+- **Code:** [`agents/sabina_evaluator.py`](./agents/sabina_evaluator.py)
 - **Internal graph:** `load_inputs → evaluate → write_report`
 - **Report contains:** overall accuracy, per-class accuracy, **class support**,
   misclassified count and ids, a `retune`/`proceed` recommendation, and short
@@ -283,7 +275,7 @@ the final deliverables.
 Generates a one-sentence plain-English justification for each sampled prediction.
 - **Reads:** `sample_for_explanation.csv`
 - **Writes:** `explanations.csv`
-- **Code:** [`agents/freddi_explanation.py`](./agents/freddi_explanation.py) · **Guide:** [notebook](./docs/explanation_agent_walkthrough.ipynb)
+- **Code:** [`agents/freddi_explanation.py`](./agents/freddi_explanation.py)
 - **Key choices:** explains from the **headline only** — it never sees the true outcome,
   so it cannot rationalise backwards; low temperature (0.3) for grounded, consistent
   wording; falls back to a deterministic placeholder if the LLM is unavailable, so the
