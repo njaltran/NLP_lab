@@ -9,26 +9,6 @@ feedback loop, and explains every prediction in plain English.
 
 ---
 
-## Introduction
-
-**Motivation.** Financial news is assumed to move markets, and modern language models
-can read that news. If a model can extract sentiment from a headline, can it also
-predict what the price does next?
-
-**Main question.** *Can a single financial-news headline predict the next day's stock
-movement (up / down / neutral)?*
-
-**Contribution.** Two things:
-
-1. **A working multi-agent system.** Five specialised agents, connected as one
-   **LangGraph**, exchanging defined contract files. The Manager evaluates
-   results and sends the classifier back to retry with new settings (feedback cycle).
-2. **An honest answer to the question.** Our best full-pipeline run reaches **0.50**
-   accuracy against a **0.516** majority-class baseline. The model is nearly blind to
-   `down` moves (5% recall).
-
----
-
 ## Quick start
 
 Python 3.13. **Recommended:** [uv](https://docs.astral.sh/uv/), which installs the
@@ -39,17 +19,20 @@ uv sync                                                  # install dependencies
 uv run main.py --no-ollama --dataset-end 2019-12-31      # run the full pipeline
 ```
 
-**Why `--dataset-end 2019-12-31`?** It drops rows after that date, keeping the COVID
+`--dataset-end 2019-12-31` drops rows after that date, keeping the COVID
 crash out of the data. Our dataset runs to mid-2020, and because the split is by date
 the 2020 crash would otherwise land entirely in the *test* set.
 **All reported results below use this flag**, so it's important to include it to reproduce them
 (11,067 rows → 7,991 train / 880 val / 2,196 test).
 
-<details>
-<summary>Alternative: plain pip</summary>
+`--no-ollama` skips the local LLM used for explanations, so the pipeline runs with no
+extra setup. To generate real LLM explanations instead, install
+[Ollama](https://ollama.com), pull `llama3.2`, and drop the flag.
+
+Alternative: plain pip
 
 If you would rather not install uv, `requirements.txt` mirrors the same
-dependencies (it is not used by `uv sync`):
+dependencies (but we recommend uv sync):
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -57,13 +40,7 @@ pip install -r requirements.txt
 python main.py --no-ollama --dataset-end 2019-12-31
 ```
 
-</details>
-
-`--no-ollama` skips the local LLM used for explanations, so the pipeline runs with no
-extra setup. To generate real LLM explanations instead, install
-[Ollama](https://ollama.com), pull `llama3.2`, and drop the flag.
-
-### What ships, and what is fetched
+### What ships
 
 **Data (included).** Both inputs ship with the repo: the raw headlines
 (`data/fnspid_raw.csv`) and the cached price history (`data/price_cache.pkl`). No
@@ -125,7 +102,7 @@ including the confidence-vs-accuracy trade-off discussed in [Future work](#futur
 
 ## Repository map
 
-**Where to look first**, in order:
+**Where to look first**:
 
 | # | Path | What it is |
 |---|---|---|
@@ -182,6 +159,27 @@ docs/                      design docs + the EDA notebook (see below)
 | [`docs/retune_loop.md`](./docs/retune_loop.md) | How the feedback loop adapts across iterations |
 | [`docs/finetune_runs.md`](./docs/finetune_runs.md) | Fine-tuning experiments and the overfitting finding |
 | [`docs/experiments/`](./docs/experiments) | Metric-optimisation experiment write-up |
+
+---
+---
+
+## Introduction
+
+**Motivation.** Financial news is assumed to move markets, and modern language models
+can read that news. If a model can extract sentiment from a headline, can it also
+predict what the price does next?
+
+**Main question.** *Can a single financial-news headline predict the next day's stock
+movement (up / down / neutral)?*
+
+**Contribution.** Two things:
+
+1. **A working multi-agent system.** Five specialised agents, connected as one
+   **LangGraph**, exchanging defined contract files. The Manager evaluates
+   results and sends the classifier back to retry with new settings (feedback cycle).
+2. **An honest answer to the question.** Our best full-pipeline run reaches **0.50**
+   accuracy against a **0.516** majority-class baseline. The model is nearly blind to
+   `down` moves (5% recall).
 
 ---
 
