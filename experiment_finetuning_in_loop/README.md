@@ -133,18 +133,5 @@ continues from that checkpoint and settles closer to the real distribution
 (0.24 / 0.32 / 0.53). Validation went 0.356 then 0.383; the gate saw
 `0.35 → 0.41 → 0.39` and stopped at the iteration cap.
 
-**An earlier version of this experiment also reweighted the loss** toward whichever
-class the evaluator flagged, and it *did* move `down` recall to 0.27. That version is
-withdrawn because it changed two things at once, and this clean run shows where the
-credit belonged: the collapse was being fixed by the reweighting, not by training in
-the loop. Isolating the variable turned a promising-looking result into an honest
-null one.
-
-The conclusion is the same one every other measurement in this project points to.
-The pipeline's threshold rule, a balanced-accuracy gate, argmax, the standalone
-fine-tune and this experiment all land between 0.34 and 0.39 balanced accuracy —
-different setups, one narrow band, just above chance.
-
-Caveats: a single run of two training rounds, stopped by the cap rather than by
-converging. Explanations used the offline fallback (no `HF_TOKEN`), which does not
-affect any number above.
+We would need to do more tests and maybe change significant parts of the project to 
+get better results.
