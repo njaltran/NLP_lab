@@ -50,15 +50,10 @@ EPOCHS_PER_ROUND = 1
 # same rows, so each round should nudge the weights rather than move them far.
 LEARNING_RATE = 5e-6
 
-# How much extra weight a focus label gets in the loss. The evaluator names the
-# weakest class each retune; this is how that feedback reaches training.
-FOCUS_BOOST = 1.5
-
 
 def train_head(*, data_path, out_dir, parent_model_dir=None,
-               focus_labels=(), epochs=EPOCHS_PER_ROUND,
-               learning_rate=LEARNING_RATE, batch_size=16, max_length=128,
-               seed=42):
+               epochs=EPOCHS_PER_ROUND, learning_rate=LEARNING_RATE,
+               batch_size=16, max_length=128, seed=42):
     """Train one round and save the result to `out_dir`.
 
     Args:
@@ -66,9 +61,6 @@ def train_head(*, data_path, out_dir, parent_model_dir=None,
         out_dir: where this round's checkpoint is written.
         parent_model_dir: checkpoint to continue from. None starts from
             pretrained FinBERT, which is what the first round does.
-        focus_labels: classes the evaluator flagged as weakest. Their loss
-            weight is multiplied by FOCUS_BOOST so the round pushes hardest on
-            the class the pipeline is actually failing.
         epochs: passes over the training rows this round.
 
     Returns a dict with the validation accuracy and where the checkpoint landed.
@@ -108,17 +100,11 @@ def train_head(*, data_path, out_dir, parent_model_dir=None,
     train_loader = make_loader(train, shuffle=True)
     val_loader = make_loader(val, shuffle=False)
 
-    # 4. Class-weighted loss, with an extra push on whatever the evaluator
-    # flagged. Without the boost the round would treat a collapsed class the
-    # same as a healthy one.
-    weights = class_weights(train, device)
-    for label in focus_labels:
-        if label in LABEL_TO_ID:
-            weights[LABEL_TO_ID[label]] *= FOCUS_BOOST
-    if focus_labels:
-        print(f"[loop-finetune] focus labels: {list(focus_labels)} (weight x{FOCUS_BOOST})")
-
-    loss_fn = torch.nn.CrossEntropyLoss(weight=weights)
+    # 4. Class-weighted loss — the same weighting the offline fine-tuner uses,
+    # correcting for the neutral-heavy data and nothing else. Deliberately no
+    # per-round reweighting: this experiment changes when training happens, not
+    # what it optimises for, so the training objective is identical every round.
+    loss_fn = torch.nn.CrossEntropyLoss(weight=class_weights(train, device))
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
     # 5. Train. Unlike the offline script there is no best-checkpoint choice to
@@ -155,5 +141,4 @@ def train_head(*, data_path, out_dir, parent_model_dir=None,
         "val_accuracy": round(val_accuracy, 4),
         "val_class_accuracy": val_class_accuracy,
         "started_from": source,
-        "focus_labels": list(focus_labels),
     }

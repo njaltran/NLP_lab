@@ -59,7 +59,12 @@ def fine_tune(state: PipelineState) -> dict:
     Skipped on the first pass, when there is no retune request yet: that pass
     classifies with pretrained FinBERT and gives the Manager a baseline to
     compare the trained rounds against. Every later pass continues from the
-    previous round's checkpoint and pushes on the evaluator's focus labels.
+    previous round's checkpoint.
+
+    The retune request is used only as the signal that a retune is happening —
+    its contents do not change how the round trains. This experiment isolates
+    one variable, when training happens, so the training objective is the same
+    every round.
     """
     retune_request = state.get("retune_request")
     if not retune_request:
@@ -74,7 +79,6 @@ def fine_tune(state: PipelineState) -> dict:
         data_path=state["processed_data_path"],
         out_dir=MODEL_DIR,
         parent_model_dir=parent,
-        focus_labels=retune_request.get("focus_labels", []),
     )
     _append_history(report)
 
