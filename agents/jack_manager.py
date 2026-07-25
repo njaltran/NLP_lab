@@ -25,6 +25,10 @@ except ModuleNotFoundError:
 OUTPUT_DIR = "outputs"
 
 
+# ---------------------------------------------------------------------------
+# Graph state
+# ---------------------------------------------------------------------------
+
 class ManagerState(TypedDict):
     """Shared state threaded through the LangGraph. Nodes return partial
     updates to these keys; LangGraph merges them in (latest-wins), except
@@ -62,6 +66,10 @@ class ManagerState(TypedDict):
     explanations_path: str       # Freddi's explanations.csv (present → finalize)
     sample_size: int             # rows for sample_for_explanation.csv (~300)
 
+
+# ---------------------------------------------------------------------------
+# Writing the contract files
+# ---------------------------------------------------------------------------
 
 def _write_json(name: str, obj: dict) -> None:
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -116,6 +124,10 @@ _BOOST_MAX = 2.0   # threshold is clamped below; without a ceiling here, repeate
                    # perturbs would escalate the boost without bound
 
 
+# ---------------------------------------------------------------------------
+# Choosing the next retune parameters
+# ---------------------------------------------------------------------------
+
 def _same(a: dict, b: dict) -> bool:
     """Param-set equality on shared keys only: Sabina's proposal omits params she
     doesn't set (e.g. `boost_factor`), and Nadi fills those from the same defaults
@@ -161,6 +173,10 @@ def _next_params(tried: list, history: list = ()) -> dict:
     return _RETUNE_SCHEDULE[-1]
 
 
+# ---------------------------------------------------------------------------
+# Detecting a collapsed class
+# ---------------------------------------------------------------------------
+
 def _collapse_detail(report: dict, floor: float) -> tuple[str, float] | None:
     """The weakest supported class and its recall when it sits below `floor` —
     the aggregate accuracy is then a degenerate win (e.g. everything predicted
@@ -204,6 +220,10 @@ def _collapse_str(report: dict, floor: float) -> str:
     return f"{label} (recall {score:.2f}, floor {floor:.2f})"
 
 
+# ---------------------------------------------------------------------------
+# Scoring and convergence
+# ---------------------------------------------------------------------------
+
 def report_score(report: dict, floor: float = 0.05) -> float:
     """Rank an iteration for best-snapshot purposes: plain accuracy, pushed below
     every healthy score when a class collapsed. One definition shared with the
@@ -227,6 +247,10 @@ def _converged(history: list, patience: int, min_delta: float) -> bool:
     earlier_best = max(history[:-patience])
     return recent_best - earlier_best < min_delta
 
+
+# ---------------------------------------------------------------------------
+# The gate — retune or proceed (deterministic)
+# ---------------------------------------------------------------------------
 
 def decide(state: ManagerState) -> dict:
     """Threshold gate (deterministic). Decides retune vs. proceed, and when
@@ -307,6 +331,10 @@ def decide(state: ManagerState) -> dict:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Routing
+# ---------------------------------------------------------------------------
+
 def route_entry(state: ManagerState) -> str:
     """Entry router: explanations back from Freddi → finalize directly. The gate
     already proceeded on this report, so re-running decide would re-count the
@@ -320,6 +348,10 @@ def route_after_decide(state: ManagerState) -> str:
     the gate already made."""
     return "retune" if state["final_action"] == "retune" else "sample"
 
+
+# ---------------------------------------------------------------------------
+# Terminal nodes — retune, proceed, finalize
+# ---------------------------------------------------------------------------
 
 def write_retune(state: ManagerState) -> dict:
     """retune_request.json (Handoff 3b) — approved proposal for Nadi. Terminal:
@@ -458,6 +490,10 @@ steady 0.61-0.65 climb, since a collapsed class makes this a degenerate pass.
 """
 
 
+# ---------------------------------------------------------------------------
+# LLM rationale (prose only, never the decision)
+# ---------------------------------------------------------------------------
+
 def _llama_rationale(state: ManagerState) -> str:
     """Ask Llama for a short rationale. Falls back to the gate's deterministic
     note when HF_TOKEN is unset, so offline mock_data tests still run."""
@@ -506,6 +542,10 @@ def rationale(state: ManagerState) -> dict:
     return {"notes": _llama_rationale(state)}
 
 
+# ---------------------------------------------------------------------------
+# Graph
+# ---------------------------------------------------------------------------
+
 def build_graph(checkpointer):
     from langgraph.graph import StateGraph, START, END
 
@@ -526,6 +566,10 @@ def build_graph(checkpointer):
     b.add_edge("finalize", END)
     return b.compile(checkpointer=checkpointer)
 
+
+# ---------------------------------------------------------------------------
+# Agent class
+# ---------------------------------------------------------------------------
 
 class ManagerAgent(Agent):
     """Manager (Jack) behind the shared `.run()` interface. Construct once, then
@@ -571,6 +615,10 @@ class ManagerAgent(Agent):
             state["explanations_path"] = explanations
         return self._invoke(state)
 
+
+# ---------------------------------------------------------------------------
+# CLI — drives the loop on mock data
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     import tempfile

@@ -66,6 +66,10 @@ DEFAULT_KEEP_ALIVE = "15m"    # keep the model resident between rows
 FALLBACK_MARKER = "[PLACEHOLDER - Ollama unavailable, not a real model explanation]"
 
 
+# ---------------------------------------------------------------------------
+# Graph state
+# ---------------------------------------------------------------------------
+
 class ExplanationState(TypedDict, total=False):
     """State threaded through the LangGraph: load_sample → explain → write_output."""
 
@@ -116,6 +120,10 @@ Headline: "Retailer cuts profit outlook on weak demand". Predicted move: a downw
 """
 
 
+# ---------------------------------------------------------------------------
+# Prompt and LLM chain
+# ---------------------------------------------------------------------------
+
 def _user_message(row: dict) -> str:
     """The per-row user turn. Carries the headline, the predicted move (in words),
     and the probabilities (so the model can sense how close the call was) — but
@@ -159,6 +167,10 @@ def _build_chain(model: str, base_url: str, timeout: float):
     )
     return prompt | llm | StrOutputParser()
 
+
+# ---------------------------------------------------------------------------
+# Offline fallback — used when the LLM is unavailable
+# ---------------------------------------------------------------------------
 
 def fallback_explanation(row: dict) -> str:
     """Deterministic placeholder when Ollama is unavailable. Like the real prompt
@@ -206,6 +218,11 @@ def _extract_explanation(raw: str) -> str:
 
 
 # --- LangGraph nodes ------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# LangGraph nodes
+# ---------------------------------------------------------------------------
 
 def load_sample(state: ExplanationState) -> dict:
     """Read sample_for_explanation.csv into the state; warn on missing columns."""
@@ -280,6 +297,10 @@ def write_output(state: ExplanationState) -> dict:
     return {}
 
 
+# ---------------------------------------------------------------------------
+# Graph
+# ---------------------------------------------------------------------------
+
 def build_graph(checkpointer):
     """Compile the agent's LangGraph: load_sample → explain → write_output."""
     from langgraph.graph import END, START, StateGraph
@@ -294,6 +315,10 @@ def build_graph(checkpointer):
     b.add_edge("write_output", END)
     return b.compile(checkpointer=checkpointer)
 
+
+# ---------------------------------------------------------------------------
+# Agent class
+# ---------------------------------------------------------------------------
 
 class ExplanationAgent(Agent):
     """Explanation agent (Freddi) behind the shared `.run()` interface. Construct
@@ -329,6 +354,10 @@ class ExplanationAgent(Agent):
             state["output_path"] = output
         return self._invoke(state)
 
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Explanation Agent (Freddi) — Handoff 5")

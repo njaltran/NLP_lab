@@ -55,6 +55,10 @@ FINAL_RESULTS_COLUMNS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Handoff 2 — reading and validating predictions
+# ---------------------------------------------------------------------------
+
 def read_prediction_rows(path: str | os.PathLike[str]) -> list[dict]:
     """Read Nadi's predictions_test.csv for Sabina and enforce column order."""
     with open(path, newline="", encoding="utf-8") as f:
@@ -95,6 +99,10 @@ def validate_prediction_rows(rows: Iterable[dict]) -> None:
             raise ValueError(f"{article_id}: confidence must equal max prob_*")
 
 
+# ---------------------------------------------------------------------------
+# Handoff 4 — the explanation sample
+# ---------------------------------------------------------------------------
+
 def _test_rows(predictions):
     """Return test rows Jack uses for explanations and final outputs."""
     if "split" not in predictions.columns:
@@ -133,6 +141,10 @@ def write_explanation_sample(
     sample.to_csv(output, index=False)
     return len(sample)
 
+
+# ---------------------------------------------------------------------------
+# Handoff 5 — the final results
+# ---------------------------------------------------------------------------
 
 def build_final_results(predictions, explanations):
     """Shape Jack's final_results.csv from Nadi predictions and Freddi output."""

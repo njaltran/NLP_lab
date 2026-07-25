@@ -93,6 +93,10 @@ PROPOSAL_FIELDS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Graph state
+# ---------------------------------------------------------------------------
+
 class EvaluatorState(TypedDict, total=False):
     """State passed through the Evaluator's internal LangGraph.
 
@@ -111,6 +115,10 @@ class EvaluatorState(TypedDict, total=False):
     report: dict
 
 
+# ---------------------------------------------------------------------------
+# Reading the inputs
+# ---------------------------------------------------------------------------
+
 def _read_predictions(path: str) -> list[dict]:
     """Read the prediction CSV from the Classifier Agent."""
     return read_prediction_rows(path)
@@ -125,6 +133,10 @@ def _read_code(path: str) -> str:
     with open(path, encoding="utf-8") as f:
         return f.read()
 
+
+# ---------------------------------------------------------------------------
+# Validating and scoring the predictions
+# ---------------------------------------------------------------------------
 
 def validate_predictions(rows: list[dict]) -> None:
     """Check that the prediction rows match the expected input format.
@@ -166,6 +178,10 @@ def compute_metrics(rows: list[dict]) -> dict:
         "misclassified_ids": [row["article_id"] for row in wrong],
     }
 
+
+# ---------------------------------------------------------------------------
+# Reading settings out of the generated classifier
+# ---------------------------------------------------------------------------
 
 def _find_assignment(code_text: str, name: str) -> str | None:
     """Find the value of a simple `NAME = value` assignment in classifier.py."""
@@ -222,6 +238,10 @@ def _weakest_labels(class_accuracy: dict, class_support: dict | None = None) -> 
         if score <= weakest_score + FOCUS_MARGIN
     ]
 
+
+# ---------------------------------------------------------------------------
+# Building the proposal for the Manager
+# ---------------------------------------------------------------------------
 
 def review_classifier_code(code_text: str, class_accuracy: dict) -> str:
     """Keep the older test interface working when only class accuracy is passed."""
@@ -325,6 +345,10 @@ def make_base_proposal(metrics: dict, code_text: str, code_notes: str) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Validating the proposal
+# ---------------------------------------------------------------------------
+
 def validate_proposal(proposal: dict, metrics: dict) -> dict:
     """Validate the recommendation before it is written into the report.
 
@@ -378,6 +402,10 @@ def validate_proposal(proposal: dict, metrics: dict) -> dict:
 
     return proposal
 
+
+# ---------------------------------------------------------------------------
+# Optional LLM review (wording only, never the numbers)
+# ---------------------------------------------------------------------------
 
 def _extract_json_object(text: str) -> dict:
     """Parse plain JSON or a fenced JSON object returned by an LLM."""
@@ -554,6 +582,10 @@ def apply_llm_review(
     return validate_proposal(proposal, metrics)
 
 
+# ---------------------------------------------------------------------------
+# Assembling the report
+# ---------------------------------------------------------------------------
+
 def _select_split(rows: list[dict], eval_split: str) -> list[dict]:
     """Return only the rows from the requested evaluation split.
 
@@ -625,6 +657,10 @@ def _write_json(path: str, obj: dict) -> None:
         json.dump(obj, f, indent=2)
 
 
+# ---------------------------------------------------------------------------
+# LangGraph nodes
+# ---------------------------------------------------------------------------
+
 def load_inputs(state: EvaluatorState) -> dict:
     """LangGraph node 1: load the prediction CSV and classifier code."""
     return {
@@ -649,6 +685,10 @@ def write_report(state: EvaluatorState) -> dict:
     return {"output_path": output_path}
 
 
+# ---------------------------------------------------------------------------
+# Graph
+# ---------------------------------------------------------------------------
+
 def build_graph(checkpointer):
     """Compile the Evaluator Agent's three-step LangGraph.
 
@@ -668,6 +708,10 @@ def build_graph(checkpointer):
     builder.add_edge("write_report", END)
     return builder.compile(checkpointer=checkpointer)
 
+
+# ---------------------------------------------------------------------------
+# Agent class
+# ---------------------------------------------------------------------------
 
 class EvaluatorAgent(Agent):
     """Sabina's Evaluator Agent using the shared `.run()` interface."""
@@ -704,6 +748,10 @@ class EvaluatorAgent(Agent):
             "eval_split": eval_split,
         })
 
+
+# ---------------------------------------------------------------------------
+# CLI — runs the evaluator on mock data
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     agent = EvaluatorAgent()

@@ -84,6 +84,10 @@ HISTORY_DIR = os.path.join(OUT, "classifier_history")
 RECURSION_LIMIT = 60
 
 
+# ---------------------------------------------------------------------------
+# Run hygiene
+# ---------------------------------------------------------------------------
+
 def clean_outputs() -> None:
     """Remove the previous run's loop artifacts from OUTPUT_DIR before a fresh
     run. Stale files actively mislead a new run: an old evaluation_report.json
@@ -101,6 +105,10 @@ def clean_outputs() -> None:
         shutil.rmtree(directory, ignore_errors=True)
 
 
+# ---------------------------------------------------------------------------
+# Graph state
+# ---------------------------------------------------------------------------
+
 class PipelineState(TypedDict, total=False):
     """Control state carried around the unified graph. Deliberately small — the
     per-row data lives in the contract CSV/JSON files the agents read and write,
@@ -115,6 +123,12 @@ class PipelineState(TypedDict, total=False):
 
 
 @dataclass
+
+
+# ---------------------------------------------------------------------------
+# The five agents
+# ---------------------------------------------------------------------------
+
 class Agents:
     """The five agents the graph drives. Bundled so tests can inject fakes for the
     network/GPU-bound ones while using the real, offline-capable others."""
@@ -140,6 +154,10 @@ class Agents:
             freddi=ExplanationAgent(use_ollama=use_ollama, output_path=EXPL),
         )
 
+
+# ---------------------------------------------------------------------------
+# The unified graph — nodes, edges, and the retune cycle
+# ---------------------------------------------------------------------------
 
 def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=None,
                    dataset_end=None, sample_size=300, checkpointer=None):
@@ -265,6 +283,10 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
     b.add_edge("finalize", END)
     return b.compile(checkpointer=checkpointer)
 
+
+# ---------------------------------------------------------------------------
+# Entry point called by main.py
+# ---------------------------------------------------------------------------
 
 def run(*, threshold=0.01, target_accuracy=0.60, max_iterations=5, patience=2,
         min_delta=0.01, sample_size=300, use_ollama=True, data_dir=None,

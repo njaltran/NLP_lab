@@ -48,6 +48,10 @@ load_dotenv()
 HF_TOKEN = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
 
 
+# ---------------------------------------------------------------------------
+# Dataset
+# ---------------------------------------------------------------------------
+
 class HeadlineDataset(Dataset):
     """Wraps headlines + labels so a DataLoader can hand them to the model in
     batches. Each item is a dict of tensors, which is what the model expects."""
@@ -74,6 +78,10 @@ class HeadlineDataset(Dataset):
             "labels": self.label_ids[i],
         }
 
+
+# ---------------------------------------------------------------------------
+# Helpers — device, split, scoring, class weights
+# ---------------------------------------------------------------------------
 
 def pick_device():
     """Use the Mac GPU (mps) or a CUDA GPU if available, else the CPU."""
@@ -156,6 +164,10 @@ def class_weights(train, device):
         weights.append(len(train) / (3 * count))
     return torch.tensor(weights, dtype=torch.float).to(device)
 
+
+# ---------------------------------------------------------------------------
+# Training run
+# ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(description="Fine-tune FinBERT on move labels.")

@@ -48,6 +48,11 @@ EXPECTED_PREDICTION_COLUMNS = PREDICTION_COLUMNS
 MOCK_DATA = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                          "mock_data", "processed_data.csv")
 
+
+# ---------------------------------------------------------------------------
+# The generated classifier — written out as classifier.py
+# ---------------------------------------------------------------------------
+
 CLASSIFIER_TEMPLATE = """
 import csv
 import os
@@ -155,6 +160,11 @@ if __name__ == "__main__":
     main(src_file, dst_file)
 """
 
+
+# ---------------------------------------------------------------------------
+# Optional LLM rewrite of classify() (opt-in, guardrailed)
+# ---------------------------------------------------------------------------
+
 def _ollama_generate(prompt: str) -> str:
     """Call the local Ollama server and return its text answer. Same simple
     urllib approach Sabina's evaluator uses — no API key, no extra package."""
@@ -208,6 +218,10 @@ def _build_llm_prompt(focus_labels, code_notes, collapsed_label="") -> str:
         "- No imports, no comments outside the function, no markdown."
     )
 
+
+# ---------------------------------------------------------------------------
+# Guardrails — a generated classify() must survive all of these
+# ---------------------------------------------------------------------------
 
 def _extract_code(text: str) -> str:
     """Strip ```python fences if the LLM wrapped its answer in them."""
@@ -306,6 +320,10 @@ def try_llm_classifier(default_code, retune_req, llm_fn=None):
     return candidate
 
 
+# ---------------------------------------------------------------------------
+# LangGraph nodes
+# ---------------------------------------------------------------------------
+
 def generate_code(state: PipelineState) -> dict:
     """LangGraph node to read parameters from state/retune request and write classifier.py."""
     threshold = 0.5
@@ -400,6 +418,11 @@ def run_classifier(state: PipelineState) -> dict:
         "predictions_path": pred_path
     }
 
+
+# ---------------------------------------------------------------------------
+# Graph
+# ---------------------------------------------------------------------------
+
 def build_graph(checkpointer):
     from langgraph.graph import StateGraph, START, END
 
@@ -410,6 +433,11 @@ def build_graph(checkpointer):
     builder.add_edge("generate_code", "run_classifier")
     builder.add_edge("run_classifier", END)
     return builder.compile(checkpointer=checkpointer)
+
+
+# ---------------------------------------------------------------------------
+# Agent class
+# ---------------------------------------------------------------------------
 
 class ClassifierAgent(Agent):
     """Classifier Agent (Nadi) behind the shared `.run()` interface."""
