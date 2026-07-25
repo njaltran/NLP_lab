@@ -61,8 +61,13 @@ python main.py --no-ollama
 extra setup. To generate real LLM explanations instead, install
 [Ollama](https://ollama.com), pull `llama3.2`, and drop the flag.
 
-**First run is slow.** `data/price_cache.pkl` is not committed, so the first run
-downloads price history from yfinance (needs internet). It is cached afterwards.
+**Runs offline.** Both inputs ship with the repo — the raw headlines
+(`data/fnspid_raw.csv`) and the cached price history (`data/price_cache.pkl`) — so
+no yfinance download is needed. The cache also keeps results reproducible, since
+yfinance can return revised history over time. Delete the cache to re-fetch prices.
+
+FinBERT itself is downloaded from Hugging Face on first use (~440 MB, cached
+afterwards), so the very first pipeline run does need internet for that.
 
 ### Useful flags
 
