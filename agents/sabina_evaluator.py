@@ -1,52 +1,30 @@
 """Sabina's Evaluator Agent.
 
-This agent runs after the Classifier Agent and before the Manager Agent. It does
-not train the model again and it does not create new predictions. Its main task
-is to check the classifier output, calculate evaluation metrics, and write the
-report that is passed to the Manager Agent.
+Runs after the Classifier Agent and before the Manager. It does not train
+anything and makes no predictions of its own: it checks the classifier's output,
+computes the metrics, and writes the report the Manager decides from.
 
-Inputs
-------
-predictions_test.csv
-    The prediction file from the Classifier Agent. It contains the true label,
-    predicted label, confidence score, class probabilities, and split for each
-    row.
+Reads `predictions_test.csv`, plus `classifier.py` as text so it can note things
+like the threshold that produced those predictions. Writes
+`evaluation_report.json` — metrics and a `retune`/`proceed` recommendation. The
+Manager still makes the final call. Exact fields: docs/data_contracts.md,
+Handoff 3.
 
-classifier.py
-    The generated classifier code. The Evaluator reads this file as text so it
-    can add short notes about the classifier setup, for example the threshold
-    used for prediction.
+Two things worth knowing about how it scores:
 
-Output
-------
-evaluation_report.json
-    The report written by the Evaluator Agent. It contains the metrics and my
-    recommendation (`retune` or `proceed`). The Manager Agent uses this report
-    in the next step, but the final pipeline decision is still made there.
-
-The metric calculation and recommendation are rule-based. If the optional LLM is
-enabled, it is only used to make the explanation text clearer. It is not allowed
-to change the metrics, action, focus labels, or suggested parameters.
-
-The Evaluator can score different data splits. During retuning, it should score
-the `val` rows. For the final report, it should score the `test` rows. This
-keeps the test data separate until the final evaluation.
+- The metrics and the recommendation are rule-based. The optional LLM only
+  rewords the explanation text; it cannot change a metric, the action, the focus
+  labels or the suggested parameters.
+- Scoring is split-aware. Retune cycles score the `val` rows and the final report
+  scores `test`, so the test set stays untouched until the very end.
 
 Exports
 -------
-EvaluatorAgent
-    Agent class used by the pipeline through `EvaluatorAgent().run()`.
+EvaluatorAgent   Agent subclass — callers do EvaluatorAgent().run()
+build_report     pure report builder, used by the graph and by the tests
 
-build_report
-    Pure report-building function used by the graph and by tests.
-
-Usage
------
-Run this file directly for a small standalone test:
-
+Usage (standalone test):
     python agents/sabina_evaluator.py
-
-See also: docs/data_contracts.md, Handoff 3.
 """
 
 import json
