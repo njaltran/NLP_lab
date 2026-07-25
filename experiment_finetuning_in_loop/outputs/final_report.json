@@ -1,10 +1,10 @@
 {
-  "final_accuracy": 0.37,
+  "final_accuracy": 0.46,
   "loop_iterations": 3,
   "class_accuracy": {
-    "up": 0.33,
-    "down": 0.27,
-    "neutral": 0.43
+    "up": 0.38,
+    "down": 0.1,
+    "neutral": 0.67
   },
   "class_support": {
     "up": 578,

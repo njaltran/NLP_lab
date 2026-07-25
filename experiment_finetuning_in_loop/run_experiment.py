@@ -17,6 +17,7 @@ See experiment_finetuning_in_loop/README.md.
 
 import argparse
 import os
+import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -35,7 +36,7 @@ from agents.pipeline_graph import (
 )
 from agents.sabina_evaluator import EvaluatorAgent
 
-from looping_classifier import MODEL_DIR, LoopFineTuningClassifier
+from looping_classifier import HISTORY_PATH, MODEL_DIR, LoopFineTuningClassifier
 
 
 def main():
@@ -67,6 +68,14 @@ def main():
     os.makedirs(os.path.join(here, OUT), exist_ok=True)
     os.chdir(here)
     print(f"[experiment] writing outputs to {os.path.join(here, OUT)}")
+
+    # Start every run from scratch. The pipeline clears its own loop artifacts,
+    # but these two are ours and would otherwise survive: a stale checkpoint
+    # would make round 1 continue from the *previous* run's weights instead of
+    # pretrained, and the history file would accumulate rounds across runs.
+    shutil.rmtree(MODEL_DIR, ignore_errors=True)
+    if os.path.exists(HISTORY_PATH):
+        os.remove(HISTORY_PATH)
 
     # The submitted bundle, with one agent replaced.
     agents = Agents(

@@ -1,31 +1,24 @@
 [
   {
     "model_dir": "outputs/finbert_loop_finetuned",
-    "train_loss": 1.1511,
-    "val_accuracy": 0.2886,
+    "train_loss": 1.1591,
+    "val_accuracy": 0.3557,
     "val_class_accuracy": {
-      "up": 0.0989,
-      "down": 0.8725,
-      "neutral": 0.0246
+      "up": 0.1217,
+      "down": 0.6096,
+      "neutral": 0.3497
     },
-    "started_from": "ProsusAI/finbert",
-    "focus_labels": [
-      "up",
-      "down"
-    ]
+    "started_from": "ProsusAI/finbert"
   },
   {
     "model_dir": "outputs/finbert_loop_finetuned",
-    "train_loss": 1.0638,
-    "val_accuracy": 0.3568,
+    "train_loss": 1.0743,
+    "val_accuracy": 0.383,
     "val_class_accuracy": {
-      "up": 0.5589,
-      "down": 0.1195,
-      "neutral": 0.3743
+      "up": 0.2395,
+      "down": 0.3227,
+      "neutral": 0.5273
     },
-    "started_from": "outputs/finbert_loop_finetuned",
-    "focus_labels": [
-      "up"
-    ]
+    "started_from": "outputs/finbert_loop_finetuned"
   }
 ]
