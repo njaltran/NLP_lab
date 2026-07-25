@@ -109,7 +109,7 @@ including the confidence-vs-accuracy trade-off discussed in [Future work](#futur
 | 2 | [`agents/pipeline_graph.py`](./agents/pipeline_graph.py) | **The orchestration.** All five agents wired into one LangGraph with the retune cycle |
 | 3 | [`agents/`](./agents) | One module per agent, each owned by one team member |
 | 4 | [`outputs/`](./outputs) | Committed results from the last real run. You can use to inspect without running anything |
-| 5 | [`docs/`](./docs) | Design rationale, data contracts, and the EDA notebook (table below) |
+| 5 | [`docs/`](./docs) | Design rationale and evidence — start with [`architecture.md`](./docs/architecture.md) and [`data_contracts.md`](./docs/data_contracts.md); the loop's behaviour is in [`retune_loop.md`](./docs/retune_loop.md). Full list in the tree below |
 
 ### Full structure
 
@@ -146,10 +146,14 @@ outputs/                   committed results of a real end-to-end run
 docs/
   architecture.md            system design, agent roles, evaluation axes
   data_contracts.md          exact columns/types of every handoff file
-  processing_experiments.ipynb  EDA: how the ±1% band and outlier fences were chosen
+  processing_experiments.ipynb  EDA and threshold calibration: how the ±1% label
+                             band and the 1st-99th percentile outlier fences
+                             were derived from the data (with plots)
   retune_loop.md             how the feedback loop adapts across iterations
-  finetune_runs.md           fine-tuning runs and the overfitting finding
-  metric_experiment.md       gate-metric / decision-rule A/B/C test
+  finetune_runs.md           the three fine-tuning runs and the overfitting finding
+  metric_experiment.md       can the loop be made to predict up/down instead of
+                             collapsing to neutral? an A/B/C test of gate metrics
+                             and decision rules
   collaborating.md           how the work was split across five people
   pipeline_graph.png         the compiled LangGraph, rendered
 
@@ -161,18 +165,6 @@ mock_data/                 small valid sample of every handoff file (used by tes
 tests/                     pytest suite
 ```
 
-### Documentation
-
-| File | Contents |
-|---|---|
-| [`docs/architecture.md`](./docs/architecture.md) | System design, agent roles, evaluation axes |
-| [`docs/data_contracts.md`](./docs/data_contracts.md) | Exact columns/types of every handoff file |
-| [`docs/processing_experiments.ipynb`](./docs/processing_experiments.ipynb) | EDA and threshold calibration — how the ±1% label band and the 1st–99th percentile outlier fences were derived from the data (with plots) |
-| [`docs/retune_loop.md`](./docs/retune_loop.md) | How the feedback loop adapts across iterations |
-| [`docs/finetune_runs.md`](./docs/finetune_runs.md) | Fine-tuning experiments and the overfitting finding |
-| [`docs/metric_experiment.md`](./docs/metric_experiment.md) | Can the loop be made to predict up/down instead of collapsing to neutral? An A/B/C test of gate metrics and decision rules |
-
----
 ---
 
 ## Introduction
@@ -295,25 +287,14 @@ horizons, none beat the majority-class baseline. Full analysis:
    warmup or decay, which is a known accelerant for overfitting.
 5. **Add non-text features.** Price momentum, volume, and volatility carry signal that
    headlines alone do not.
-6. **Split the classifier into two directional heads.** From notes following our presentation discussion, 
-  Instead of one model choosing between three classes, train two independent binary models — an `up`-head
-   (`up` vs `neutral`) and a `down`-head (`down` vs `neutral`). Then we recombine their
-   outputs into a three-way distribution, where `neutral` is the probability mass left
-   over when neither head fires:
-
-   ```
-   raw = { up: p_up,  down: p_down,  neutral: (1 - p_up) * (1 - p_down) }
-   ```
-   normalised so the three sum to 1.
-
-   The motivation is our weakest result: `down` recall of 0.05. In a single 3-class
-   model, `down` competes against both other classes at once and loses. Giving it a
-   dedicated binary model, trained only on `down` and `neutral` rows, never seeing
-   `up` at all removes that competition and should sharpen the decision boundary the
-   model actually struggles with.
-
-   With the extra days for submission, the Manager's owner tried to prototype it in an open pull request in our project repo.
-   **not yet validated on our data as it would take a long time**, so no accuracy claim is made here -> just a future improvement idea.
+6. **Split the classifier into two directional heads.** Instead of one model choosing
+   between three classes, train two binary models — an `up`-head (`up` vs `neutral`)
+   and a `down`-head (`down` vs `neutral`) — and recombine their outputs, treating
+   `neutral` as the probability left when neither head fires. The motivation is our
+   weakest result: in a single 3-class model, `down` competes against both other
+   classes at once and loses at 0.05 recall; a dedicated binary model removes that
+   competition. Prototyped after the presentation in an open pull request but not
+   validated on our data, so no accuracy claim is made here.
 7. **Fine-tune inside the retune loop.** Today training happens once, offline, and each
    retune only adjusts inference settings (`threshold`, `boost_factor`) on fixed
    weights — so the loop can reshuffle predictions but never actually learns from the
