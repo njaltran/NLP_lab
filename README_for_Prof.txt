@@ -3,8 +3,8 @@ NLP LAB - PREDICTING STOCK MOVEMENT FROM FINANCIAL NEWS HEADLINES
 Team 2: Aurora, Freddi, Jack, Nadi, Sabina
 ===============================================================================
 
-Plain-text quick reference. The full documentation is in README.md
-(in VS Code, open it and press Cmd+Shift+V / Ctrl+Shift+V to render it).
+Plain-text quick reference. 
+The full documentation is in README.md (in VS Code, open it and press Cmd+Shift+V / Ctrl+Shift+V to render it).
 
 
 -------------------------------------------------------------------------------
@@ -77,7 +77,7 @@ It is a marimo app, so "python dashboard.py" will NOT open it. Use:
 main.py                    entry point: parses flags, runs the pipeline
 dashboard.py               marimo dashboard
 README.md                  full documentation (render with Cmd+Shift+V)
-README.txt                 this file
+README_for_Prof.txt        this file
 
 agents/                    one module per agent, one owner each
   pipeline_graph.py          THE ORCHESTRATION - all five agents wired into

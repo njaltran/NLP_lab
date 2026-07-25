@@ -143,9 +143,22 @@ outputs/                   committed results of a real end-to-end run
   explanations.csv         Freddi's per-prediction justifications
   decision.json            the Manager's decision log
 
+docs/
+  architecture.md            system design, agent roles, evaluation axes
+  data_contracts.md          exact columns/types of every handoff file
+  processing_experiments.ipynb  EDA: how the ±1% band and outlier fences were chosen
+  retune_loop.md             how the feedback loop adapts across iterations
+  finetune_runs.md           fine-tuning runs and the overfitting finding
+  metric_experiment.md       gate-metric / decision-rule A/B/C test
+  collaborating.md           how the work was split across five people
+  pipeline_graph.png         the compiled LangGraph, rendered
+
+experiment_finetuning_in_loop/   NOT part of the presented architecture — a
+                                 later experiment that moves fine-tuning inside
+                                 the retune loop (see its own README)
+
 mock_data/                 small valid sample of every handoff file (used by tests)
 tests/                     pytest suite
-docs/                      design docs + the EDA notebook (see below)
 ```
 
 ### Documentation
@@ -157,7 +170,7 @@ docs/                      design docs + the EDA notebook (see below)
 | [`docs/processing_experiments.ipynb`](./docs/processing_experiments.ipynb) | EDA and threshold calibration — how the ±1% label band and the 1st–99th percentile outlier fences were derived from the data (with plots) |
 | [`docs/retune_loop.md`](./docs/retune_loop.md) | How the feedback loop adapts across iterations |
 | [`docs/finetune_runs.md`](./docs/finetune_runs.md) | Fine-tuning experiments and the overfitting finding |
-| [`docs/experiments/`](./docs/experiments) | Metric-optimisation experiment write-up |
+| [`docs/metric_experiment.md`](./docs/metric_experiment.md) | Can the loop be made to predict up/down instead of collapsing to neutral? An A/B/C test of gate metrics and decision rules |
 
 ---
 ---
@@ -251,7 +264,7 @@ moved balanced accuracy meaningfully above chance. This matches published work �
 Karaoglu & Gowda (2026) found that across five sentiment models and six prediction
 horizons, none beat the majority-class baseline. Full analysis:
 [`docs/finetune_runs.md`](./docs/finetune_runs.md) and
-[`docs/experiments/`](./docs/experiments).
+[`docs/metric_experiment.md`](./docs/metric_experiment.md).
 
 ### References
 
