@@ -1,7 +1,7 @@
 # NLP Lab - Predicting Stock Movement from Financial News Headlines
 
-A five-agent **LangGraph** pipeline that predicts the **next-day stock move**
-(`up` / `down` / `neutral`) from a financial-news headline using **FinBERT**,
+A five-agent LangGraph pipeline that predicts the next-day stock move
+(`up` / `down` / `neutral`) from a financial-news headline using FinBERT,
 evaluates itself in a feedback loop, and explains every prediction in plain English.
 
 > **Just want the results?** Open [`outputs/final_report.json`](./outputs/final_report.json) — committed from a real run, no setup needed.
@@ -21,7 +21,7 @@ uv run main.py --no-ollama --dataset-end 2019-12-31      # run the full pipeline
 
 `--dataset-end 2019-12-31` drops rows after that date, keeping the COVID
 crash out of the data. Our dataset runs to mid-2020, and because the split is by date
-the 2020 crash would otherwise land entirely in the *test* set.
+the 2020 crash would otherwise land entirely in the test set.
 **All reported results below use this flag**, so it's important to include it to reproduce them
 (11,067 rows → 7,991 train / 880 val / 2,196 test).
 
@@ -54,7 +54,7 @@ end-to-end run, so the results can be inspected and graded without running anyth
 
 | | Size | How to get it |
 |---|---|---|
-| Pretrained FinBERT (`ProsusAI/finbert`) | ~440 MB | Downloads automatically from Hugging Face on first use, then cached locally. **The first run needs internet for this.** |
+| Pretrained FinBERT (`ProsusAI/finbert`) | ~440 MB | Downloads automatically from Hugging Face on first use, then cached locally. The first run needs internet for this. |
 | Our fine-tuned weights | ~420 MB | Not shipped, to keep the submission small. Regenerate by running the Processing agent first, then the fine-tuner (both seeded and reproducible) - see below. Results are logged in [`docs/finetune_runs.md`](./docs/finetune_runs.md). |
 
 Neither is required to inspect the committed results but only to re-run the pipeline
@@ -109,7 +109,7 @@ including the confidence-vs-accuracy trade-off discussed in [Future work](#futur
 | 1 | [`main.py`](./main.py) | Entry point. It parses flags, invokes the pipeline graph |
 | 2 | [`agents/pipeline_graph.py`](./agents/pipeline_graph.py) | **The orchestration.** All five agents wired into one LangGraph with the retune cycle |
 | 3 | [`agents/`](./agents) | One module per agent, each owned by one team member |
-| 4 | [`outputs/`](./outputs) | **Committed results** from a real run. You can use to inspect without running anything |
+| 4 | [`outputs/`](./outputs) | Committed results from the last real run. You can use to inspect without running anything |
 | 5 | [`docs/`](./docs) | Design rationale, data contracts, and the EDA notebook (table below) |
 
 ### Full structure
@@ -155,7 +155,7 @@ docs/                      design docs + the EDA notebook (see below)
 |---|---|
 | [`docs/architecture.md`](./docs/architecture.md) | System design, agent roles, evaluation axes |
 | [`docs/data_contracts.md`](./docs/data_contracts.md) | Exact columns/types of every handoff file |
-| [`docs/processing_experiments.ipynb`](./docs/processing_experiments.ipynb) | **EDA and threshold calibration** — how the ±1% label band and the 1st–99th percentile outlier fences were derived from the data (with plots) |
+| [`docs/processing_experiments.ipynb`](./docs/processing_experiments.ipynb) | EDA and threshold calibration — how the ±1% label band and the 1st–99th percentile outlier fences were derived from the data (with plots) |
 | [`docs/retune_loop.md`](./docs/retune_loop.md) | How the feedback loop adapts across iterations |
 | [`docs/finetune_runs.md`](./docs/finetune_runs.md) | Fine-tuning experiments and the overfitting finding |
 | [`docs/experiments/`](./docs/experiments) | Metric-optimisation experiment write-up |
@@ -174,12 +174,11 @@ movement (up / down / neutral)?*
 
 **Contribution.** Two things:
 
-1. **A working multi-agent system.** Five specialised agents, connected as one
-   **LangGraph**, exchanging defined contract files. The Manager evaluates
+1. Five specialised agents, connected as one
+   LangGraph, exchanging defined contract files. The Manager evaluates
    results and sends the classifier back to retry with new settings (feedback cycle).
-2. **An honest answer to the question.** Our best full-pipeline run reaches **0.50**
-   accuracy against a **0.516** majority-class baseline. The model is nearly blind to
-   `down` moves (5% recall).
+2. Our best full-pipeline run reaches **0.50** accuracy against a **0.516** majority-class baseline. 
+   The model is nearly blind to `down` moves (5% recall).
 
 ---
 
@@ -214,11 +213,11 @@ The choices that shape the results, and why each was made:
 | Decision | Why |
 |---|---|
 | **±1% label band** — `up` above +1%, `down` below −1%, else `neutral` | Derived from the price-change distribution in the [EDA notebook](./docs/processing_experiments.ipynb); the same 0.01 cutoff used by Jiang & Zeng |
-| **Split by date, never randomly** | A model predicting the future must train on the past and be tested on a future it has never seen — a random split would leak future information |
+| **Split by date** | A model predicting the future must train on the past and be tested on a future it has never seen — a random split would leak future information |
 | **`val` = last 10% of the training dates** | The retune loop scores itself on `val`, so `test` stays untouched until the final report and the loop cannot overfit its own measurement |
 | **Classifier predicts held-out rows only** | Training rows were already seen by the model; scoring them would inflate accuracy |
 | **Explanations from the headline only** | Freddi never sees the true outcome, so it cannot rationalise backwards from the answer — it explains at prediction time, like a real system would |
-| **The gate is pure rules; the LLM writes only prose** | Every control decision (retune vs proceed, which settings to try, the metrics) must be reproducible and auditable; a stochastic model cannot be allowed to flip them |
+| **The gate is only rules** | Every control decision (retune vs proceed, which settings to try, the metrics) must be reproducible and auditable; a stochastic model cannot be allowed to flip them |
 | **Outliers trimmed at the 1st–99th percentile** | Stock returns are fat-tailed, so the usual IQR×1.5 rule discarded ~10% of the data; percentile fences keep exactly 98% regardless of distribution shape |
 
 ---
@@ -241,17 +240,17 @@ COVID period excluded (`--dataset-end 2019-12-31`):
 
 **How to read this.** On plain accuracy the model (0.50) does *not* beat
 always-guessing-neutral (0.516) — because neutral is 52% of the test set, so that one
-class carries the score. On **balanced accuracy**, which weights all three classes
+class carries the score. On balanced accuracy, which weights all three classes
 equally and therefore cannot be gamed by the majority class, the model scores **0.39
 against a 0.333 chance baseline** — modest improvement, earned by the up
 (0.36) and down (0.05) predictions that always-neutral scores 0.00 on.
 
 The consistent finding across every architecture and hyperparameter setting we tried:
-**`down` moves are near-unpredictable from a single headline.** Fine-tuning peaked
+`down` moves are near-unpredictable from a single headline. Fine-tuning peaked
 after one epoch in every run (immediate overfitting), and no combination of settings
 moved balanced accuracy meaningfully above chance. This matches published work —
 Karaoglu & Gowda (2026) found that across five sentiment models and six prediction
-horizons, *none* beat the majority-class baseline. Full analysis:
+horizons, none beat the majority-class baseline. Full analysis:
 [`docs/finetune_runs.md`](./docs/finetune_runs.md) and
 [`docs/experiments/`](./docs/experiments).
 
@@ -262,7 +261,7 @@ horizons, *none* beat the majority-class baseline. Full analysis:
   hyperparameters (batch 16, lr 2e-5, 3 epochs) sit inside the ranges recommended in
   Appendix A.3.
 - **Jiang & Zeng (2025)**, *Financial Sentiment Analysis Using FinBERT with Application
-  in Predicting Stock Movement* — source for the **±1% label threshold**; their
+  in Predicting Stock Movement* — source for the ±1% label threshold; their
   Numerical Sentiment Index uses the identical 0.01 return cutoff.
 - **Karaoglu & Gowda (2026)**, *Can News Predict the Market? Limits of Zero-Shot
   Financial NLP* — independent corroboration that **no model beat the majority-class
@@ -285,7 +284,7 @@ horizons, *none* beat the majority-class baseline. Full analysis:
 5. **Add non-text features.** Price momentum, volume, and volatility carry signal that
    headlines alone do not.
 6. **Split the classifier into two directional heads.** From notes following our presentation discussion, 
-  Instead of one model choosing between three classes, train **two independent binary models** — an `up`-head
+  Instead of one model choosing between three classes, train two independent binary models — an `up`-head
    (`up` vs `neutral`) and a `down`-head (`down` vs `neutral`). Then we recombine their
    outputs into a three-way distribution, where `neutral` is the probability mass left
    over when neither head fires:
@@ -297,7 +296,7 @@ horizons, *none* beat the majority-class baseline. Full analysis:
 
    The motivation is our weakest result: `down` recall of 0.05. In a single 3-class
    model, `down` competes against both other classes at once and loses. Giving it a
-   dedicated binary model, trained **only** on `down` and `neutral` rows, never seeing
+   dedicated binary model, trained only on `down` and `neutral` rows, never seeing
    `up` at all removes that competition and should sharpen the decision boundary the
    model actually struggles with.
 
@@ -305,11 +304,11 @@ horizons, *none* beat the majority-class baseline. Full analysis:
    **not yet validated on our data as it would take a long time**, so no accuracy claim is made here -> just a future improvement idea.
 7. **Fine-tune inside the retune loop.** Today training happens once, offline, and each
    retune only adjusts inference settings (`threshold`, `boost_factor`) on fixed
-   weights — so the loop can reshuffle predictions but never actually *learns* from the
+   weights — so the loop can reshuffle predictions but never actually learns from the
    evaluator's feedback. Making every retune a fine-tuning pass on the weakest class
    would close that gap and turn the loop into genuine iterative training. This was also included in the prototype about two directional heads, but because it involves a much bigger PR changing a lot of the context of the project, we also decided not to include it in submission.
 8. **Reject low confidence — we trade coverage for precision.** As we mentioned in the presentation during the dashboard, 
-  the model's confidence turns out to be *informative*: filtering to only its more confident predictions
+  the model's confidence turns out to be informative: filtering to only its more confident predictions
    raises accuracy sharply. Measured on the committed test set:
 
    | Min. confidence | Predictions kept | Coverage | Accuracy |

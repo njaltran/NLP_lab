@@ -7,12 +7,12 @@
 
 ## The gap this addresses
 
-In the submitted pipeline, training happens **once, offline**
-(`agents/finetune_finbert.py`), and each retune only adjusts *inference*
+In the submitted pipeline, training happens once, offline
+(`agents/finetune_finbert.py`), and each retune only adjusts inference
 settings — `threshold` and `boost_factor` — on top of fixed weights.
 
-That means the loop can **rearrange** predictions in response to the evaluator,
-but it can never actually **learn** from that feedback. When Sabina reports that
+That means the loop can rearrange predictions in response to the evaluator,
+but it can never actually learn from that feedback. When Sabina reports that
 the `down` class has collapsed to 0.05 recall, the model that produced those
 predictions is the same model that will produce the next ones.
 
@@ -84,12 +84,17 @@ uv run experiment_finetuning_in_loop/run_experiment.py --no-ollama --dataset-end
 pass — budget roughly 5–15 minutes per iteration on a laptop GPU, so 20–45
 minutes overall.
 
-Outputs go to the usual `outputs/` contract files. Two extra artifacts are
-written so the run can be read without repeating it:
+Everything this run writes goes to `experiment_finetuning_in_loop/outputs/`, not
+the submitted pipeline's `outputs/`. That isolation matters: the pipeline clears
+its loop artifacts at the start of every run, so without it an experiment run
+would delete the committed results of the run we actually presented. The script
+changes its working directory before building the graph, which redirects all the
+contract paths at once; the input data still loads from the repo root.
 
-- `outputs/finbert_loop_finetuned/` — the checkpoints (kept separate from the
-  submitted pipeline's `outputs/finbert_finetuned/`, so an experiment run can
-  never overwrite them)
+Alongside the usual contract files, two extra artifacts are written so the run
+can be read without repeating it:
+
+- `outputs/finbert_loop_finetuned/` — the checkpoint after each round
 - `outputs/loop_finetune_history.json` — one entry per training round:
   validation accuracy, per-class accuracy, the focus labels used, and which
   checkpoint the round started from

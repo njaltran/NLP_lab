@@ -57,6 +57,17 @@ def main():
 
     load_dotenv()  # make .env secrets (e.g. HF_TOKEN) visible to the agents
 
+    # Write this run's contract files into the experiment folder, not the
+    # submitted pipeline's outputs/. Every agent builds its output paths from a
+    # relative "outputs" string, and the pipeline clears loop artifacts before
+    # each run — so without this an experiment run would overwrite the committed
+    # results of the run we actually submitted. Aurora resolves data/ from the
+    # repo root rather than the working directory, so her inputs still load.
+    here = os.path.dirname(os.path.abspath(__file__))
+    os.makedirs(os.path.join(here, OUT), exist_ok=True)
+    os.chdir(here)
+    print(f"[experiment] writing outputs to {os.path.join(here, OUT)}")
+
     # The submitted bundle, with one agent replaced.
     agents = Agents(
         aurora=ProcessingAgent(),
@@ -82,7 +93,7 @@ def main():
     )
 
     print(f"\n[experiment] done -- {final['final_action']} at iteration "
-          f"{final['iteration']}. Outputs in {OUT}/, checkpoints in {MODEL_DIR}/")
+          f"{final['iteration']}. Outputs in {os.path.join(here, OUT)}/")
 
 
 if __name__ == "__main__":

@@ -34,7 +34,7 @@ Requires Python 3.13. Recommended: uv (https://docs.astral.sh/uv/)
     uv sync
     uv run main.py --no-ollama --dataset-end 2019-12-31
 
-Without uv:
+Without uv (uv is recommended though - more accurate versions used!!):
 
     python -m venv .venv
     source .venv/bin/activate
