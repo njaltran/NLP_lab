@@ -5,7 +5,7 @@ A five-agent LangGraph pipeline that predicts the next-day stock move
 evaluates itself in a feedback loop, and explains every prediction in plain English.
 
 > **Just want the results?** Open [`outputs/final_report.json`](./outputs/final_report.json) — committed from a real run, no setup needed.
-> **Want to run it?** Everything you need is in the next section. 🙂
+> **Want to run it?** Everything you need is in the next section. :)
 
 ---
 
@@ -31,8 +31,7 @@ extra setup. To generate real LLM explanations instead, install
 
 Alternative: plain pip
 
-If you would rather not install uv, `requirements.txt` mirrors the same
-dependencies (but we recommend uv sync):
+`requirements.txt` mirrors the same dependencies (but we recommend uv sync):
 
 ```bash
 python -m venv .venv && source .venv/bin/activate

@@ -80,12 +80,10 @@ From the repo root:
 uv run experiment_finetuning_in_loop/run_experiment.py --no-ollama --dataset-end 2019-12-31
 ```
 
-**This is slow.** Every retune is a training round rather than a fast inference
-pass — budget roughly 5–15 minutes per iteration on a laptop GPU, so 20–45
-minutes overall.
+**This will take some time!!** 
 
 Everything this run writes goes to `experiment_finetuning_in_loop/outputs/`, not
-the submitted pipeline's `outputs/`. That isolation matters: the pipeline clears
+the submitted pipeline's `outputs/`. That isolation matters because the pipeline clears
 its loop artifacts at the start of every run, so without it an experiment run
 would delete the committed results of the run we actually presented. The script
 changes its working directory before building the graph, which redirects all the
@@ -99,15 +97,9 @@ can be read without repeating it:
   validation accuracy, per-class accuracy, the focus labels used, and which
   checkpoint the round started from
 
-## What we expect, and why we are reporting it either way
+## Results
 
-We do **not** expect this to beat the 0.516 majority-class baseline. Every
-result in the main submission points to the ceiling being the *data* — one
-headline carries very little information about the next day's price move, and
-Karaoglu & Gowda (2026) report the same across five models and six horizons.
+The experiment ran once 25-07-2026 and gave the following output (we have included only the final output file just to not make the file even heavier):
 
-The point of the experiment is architectural: it makes the loop genuinely
-*iterative training* rather than iterative re-scoring, which is the more honest
-version of the "self-correcting pipeline" claim. Whether the accuracy moves or
-not, the outcome is worth reporting — and if it does not move, that is one more
-piece of evidence for the same conclusion.
+
+
