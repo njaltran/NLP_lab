@@ -80,7 +80,7 @@ From the repo root:
 uv run experiment_finetuning_in_loop/run_experiment.py --no-ollama --dataset-end 2019-12-31
 ```
 
-**This will take some time!!** 
+**This will take some time!! (one and only run lasted around half an hour)** 
 
 Everything this run writes goes to `experiment_finetuning_in_loop/outputs/`, not
 the submitted pipeline's `outputs/`. That isolation matters because the pipeline clears
@@ -100,6 +100,48 @@ can be read without repeating it:
 ## Results
 
 The experiment ran once 25-07-2026 and gave the following output (we have included only the final output file just to not make the file even heavier):
+
+Settings: `--no-ollama --dataset-end 2019-12-31`, default cap of 3 iterations —
+one baseline pass on pretrained FinBERT, then two training rounds.
+
+| | Submitted pipeline | This experiment |
+|---|---|---|
+| Test accuracy | 0.50 | 0.37 |
+| `up` recall | 0.36 | 0.33 |
+| `down` recall | 0.05 | 0.27 |
+| `neutral` recall | 0.76 | 0.43 |
+| Balanced accuracy | 0.39 | 0.34 |
+
+*(majority-class baseline 0.516; chance, on balanced accuracy, 0.333)*
+
+**1. It fixed the class collapse, which is what it was built to do.** `down` recall went
+from 0.05 to 0.27, and the model stopped hiding behind `neutral`. It predicted
+26/3/71 percent up/down/neutral before and 31/25/43 after, against a true split of
+26/22/52. The evaluator's feedback reached training and changed the model.
+
+**2. The accuracy still went down, not up.** Spreading the predictions out removed the
+inflation the 0.50 depended on — that number came from predicting `neutral` for 71%
+of a test set that is only 52% neutral. Balanced accuracy, which cannot be inflated
+that way, moved from 0.39 to 0.34: no better than chance either way.
+
+**3. The loop overcorrects.** Round 1 was told `up` and `down` were weak and swung
+almost entirely to `down` (recall 0.87, with `neutral` down at 0.02). Round 2 was told
+`up` was weak and swung back to `up` (0.56). Validation accuracy went
+`0.35 → 0.40 → 0.34` — it peaked mid-loop and then regressed. `FOCUS_BOOST = 1.5` is
+too strong when each round continues from the previous checkpoint, because the push
+accumulates across rounds. A smaller boost, or one that decays as rounds progress,
+is the obvious next thing to try.
+
+The honest summary: making the loop train genuinely changed the model's behaviour, but
+not its skill. That matches everything else we measured — the pipeline's threshold
+rule, a balanced-accuracy gate, argmax, the standalone fine-tune and this experiment
+all land between 0.34 and 0.39 balanced accuracy. Six fairly different setups, one
+narrow band, just above chance.
+
+Caveats: this is a single run of two training rounds, stopped by the iteration cap
+rather than by converging, so the oscillation might settle if it ran longer.
+Explanations used the offline fallback (no `HF_TOKEN` set), which does not affect any
+of the numbers above.
 
 
 
