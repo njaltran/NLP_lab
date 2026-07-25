@@ -35,12 +35,27 @@ movement (up / down / neutral)?*
 
 ## Quick start
 
-Python 3.13, dependencies managed with [uv](https://docs.astral.sh/uv/).
+Python 3.13. **Recommended:** [uv](https://docs.astral.sh/uv/), which installs the
+exact locked dependency versions from `uv.lock`.
 
 ```bash
 uv sync                      # install dependencies
 uv run main.py --no-ollama   # run the full pipeline
 ```
+
+<details>
+<summary>Alternative: plain pip</summary>
+
+If you would rather not install uv, `requirements.txt` mirrors the same
+dependencies (it is not used by `uv sync`):
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python main.py --no-ollama
+```
+
+</details>
 
 `--no-ollama` skips the local LLM used for explanations, so the pipeline runs with no
 extra setup. To generate real LLM explanations instead, install

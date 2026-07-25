@@ -1,15 +1,29 @@
+# Alternative to `uv sync` for pip users. Kept in step with the [project]
+# dependencies in pyproject.toml — update both when adding a dependency.
+
+# Data ingestion and market prices
 dlt[duckdb]>=1.0.0
 yfinance>=0.2.40
+
+# Agent orchestration (LangGraph) and the local LLM used for explanations
 langchain-core>=0.3.0
 langchain-ollama>=0.2.0
 langgraph>=1.2.6
 langgraph-checkpoint-sqlite>=3.1.0
-huggingface_hub>=1.21.0
-pandas>=2.0.0
+
+# FinBERT: model hub, tensors, tokenization
+huggingface-hub>=1.21.0
 torch>=2.2.0
 transformers>=4.38.0
-marimo>=0.23.0
-altair>=5.0.0
-pyarrow>=14.0.0
+
+# Data handling
+pandas>=2.0.0
+pyarrow>=24.0.0
 certifi>=2024.0.0
 
+# Dashboard
+marimo>=0.23.11
+altair>=6.2.2
+
+# Dev only — needed to run the test suite (a dependency-group in pyproject.toml)
+pytest>=9.1.1
