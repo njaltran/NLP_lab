@@ -328,7 +328,7 @@ horizons, *none* beat the majority-class baseline. Full analysis:
    a call on every headline, a practical system could **abstain by default and only act
    when confident**. Validating that properly needs a confidence cutoff tuned on the
    `val` split and reported with confidence intervals, not read off the test set.
-   Explore it interactively in [`dashboard.py`](./dashboard.py).
+   Explore it in [`dashboard.py`](./dashboard.py). 
 
 ---
 
@@ -342,5 +342,5 @@ horizons, *none* beat the majority-class baseline. Full analysis:
 | Manager | Jack | `agents/jack_manager.py` |
 | Explanation | Freddi | `agents/freddi_explanation.py` |
 
-Working agreement and contribution rules: [`CLAUDE.md`](./CLAUDE.md) ·
+How we split the work and why the file contracts exist:
 [`docs/collaborating.md`](./docs/collaborating.md)
