@@ -5,7 +5,7 @@
 > submitted pipeline stays exactly as it was during the project. Nothing in
 > `agents/` or `main.py` is modified by anything in here.
 
-## The gap this addresses
+## The gap
 
 In the submitted pipeline, training happens once, offline
 (`agents/finetune_finbert.py`), and each retune only adjusts inference
