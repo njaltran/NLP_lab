@@ -230,3 +230,9 @@ data/processed_data.csv
 
 # Stray raw API dumps — not part of the repo
 download*.json
+
+# macOS folder metadata
+.DS_Store
+
+# AI coding-assistant local config — not part of the project
+.claude/
