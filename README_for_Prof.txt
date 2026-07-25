@@ -111,7 +111,17 @@ docs/                      design docs and the EDA notebook
   processing_experiments.ipynb  EDA: how the +/-1% label band was chosen
   retune_loop.md             how the feedback loop adapts
   finetune_runs.md           fine-tuning experiments and the overfitting finding
+  metric_experiment.md       gate-metric / decision-rule A/B/C test
   collaborating.md           how we split the work across five people
+  pipeline_graph.png         the compiled LangGraph, rendered
+
+experiment_finetuning_in_loop/
+                           NOT part of the architecture we presented. A later
+                           experiment that moves fine-tuning inside the retune
+                           loop, kept separate so the submitted pipeline stays
+                           as it was during the project. It has its own README
+                           and writes its own outputs; nothing in agents/ or
+                           main.py is changed by it.
 
 mock_data/                 small valid sample of every handoff file (used by tests)
 tests/                     pytest suite
