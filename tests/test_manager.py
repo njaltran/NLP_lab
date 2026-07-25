@@ -125,25 +125,16 @@ def test_outputs_match_contract(outdir, proceed_report):
     assert rep["manually_scored"] == int(fin.manual_score.notna().sum())
 
 
-def test_retune_request_carries_code_notes(outdir):
-    """Nadi's LLM code adaptation reads `code_notes` from retune_request.json,
-    so the manager must pass Sabina's observations through unchanged."""
-    g, cfg = _graph(), {"configurable": {"thread_id": "notes"}}
-    report = json.loads(json.dumps(RETUNE_REPORT))
-    report["proposal"]["code_notes"] = "threshold hardcoded at 0.5 in classifier.py"
-    g.invoke({**BASE, "evaluation_report": report}, cfg)
+def test_retune_request_carries_heads_to_retrain(outdir):
+    """Nadi's fine_tune node reads `heads_to_retrain`/`collapsed_heads` from
+    retune_request.json (ADR 0001) — Jack must write them."""
+    g, cfg = _graph(), {"configurable": {"thread_id": "heads"}}
+    g.invoke({**BASE, "evaluation_report": RETUNE_REPORT}, cfg)
     req = json.loads((outdir / "retune_request.json").read_text())
-    assert req["code_notes"] == "threshold hardcoded at 0.5 in classifier.py"
-
-
-def test_retune_request_code_notes_empty_when_proposal_omits_them(outdir):
-    g, cfg = _graph(), {"configurable": {"thread_id": "notes-empty"}}
-    report = {"accuracy": 0.37,
-              "proposal": {"recommended_action": "retune", "focus_labels": ["down"],
-                           "suggested_params": {"threshold": 0.5, "max_length": 128}}}
-    g.invoke({**BASE, "evaluation_report": report}, cfg)
-    req = json.loads((outdir / "retune_request.json").read_text())
-    assert req["code_notes"] == ""
+    assert req["heads_to_retrain"] == ["down"]
+    assert req["collapsed_heads"] == []
+    assert "suggested_params" not in req
+    assert "code_notes" not in req
 
 
 # --- public ManagerAgent.run() API ---------------------------------------
@@ -195,39 +186,6 @@ def test_convergence_proceeds_before_cap_when_accuracy_flat():
     assert actions[2] == "proceed"
 
 
-def test_retune_params_adapt_and_do_not_repeat():
-    """Consecutive retunes must escalate: after the first (which accepts Sabina's
-    proposal), each retune picks a fresh, previously-unused param set."""
-    g, cfg = _graph(), {"configurable": {"thread_id": "adapt"}}
-    base = {"target_accuracy": 0.60, "max_iterations": 9, "patience": 99, "min_delta": 0.0,
-            "predictions_path": PRED}
-    seen = [g.invoke({**base, "evaluation_report": _report(0.37)}, cfg)["tried_params"][-1]
-            for _ in range(4)]
-    assert len(seen) == 4
-    # no two consecutive retunes used the same params
-    assert all(seen[i] != seen[i + 1] for i in range(len(seen) - 1))
-    assert {"threshold", "boost_factor"} <= set(seen[-1])
-
-
-def test_second_retune_skips_schedule_entry_matching_sabinas_proposal():
-    """Regression (2026-07-02 run): Sabina's accepted first-retune proposal
-    {threshold: 0.45, max_length: 128} lacks the schedule's boost_factor key, so
-    plain dict equality treated schedule entry 0 (same threshold/max_length) as
-    untried and the second retune regenerated an identical classifier. Matching
-    must compare shared keys only."""
-    g, cfg = _graph(), {"configurable": {"thread_id": "shared-keys"}}
-    base = {"target_accuracy": 0.60, "max_iterations": 9, "patience": 99, "min_delta": 0.0,
-            "predictions_path": PRED}
-    report = _report(0.37)
-    report["proposal"]["suggested_params"] = {"threshold": 0.45, "max_length": 128}
-
-    first = g.invoke({**base, "evaluation_report": report}, cfg)["tried_params"][-1]
-    second = g.invoke({**base, "evaluation_report": report}, cfg)["tried_params"][-1]
-    assert first == {"threshold": 0.45, "max_length": 128}
-    # second retune must not re-run the same threshold Sabina's proposal used
-    assert second["threshold"] != 0.45
-
-
 def test_finalize_pass_does_not_duplicate_accuracy_history(proceed_report):
     """The finalize invocation must not re-append the accuracy the loop already
     recorded (bug seen live: 9 entries, 8 iterations) — it routes straight to
@@ -276,6 +234,101 @@ def test_zero_support_class_does_not_block_cleared_target():
     assert out["final_action"] == "proceed"
 
 
+# --- weak/collapsed head selection (ADR 0001) ------------------------------
+
+def test_weak_heads_filters_focus_labels_to_directional_heads():
+    report = {"class_accuracy": {"up": 0.5, "down": 0.4, "neutral": 0.6},
+              "proposal": {"focus_labels": ["down", "neutral"]}}
+    assert jm._weak_heads(report, 0.05) == ["down"]
+
+
+def test_weak_heads_defaults_to_both_when_only_neutral_flagged():
+    """A retune with nothing to retrain would burn an iteration for free --
+    if neither directional head stood out as weakest, retrain both."""
+    report = {"class_accuracy": {"up": 0.5, "down": 0.4, "neutral": 0.6},
+              "proposal": {"focus_labels": ["neutral"]}}
+    assert set(jm._weak_heads(report, 0.05)) == {"up", "down"}
+
+
+def test_weak_heads_defaults_to_both_when_focus_labels_missing():
+    assert set(jm._weak_heads({"proposal": {}}, 0.05)) == {"up", "down"}
+
+
+def test_weak_heads_prioritizes_a_collapsed_head_over_focus_labels():
+    """Collapse is a sharper signal than Sabina's general "weakest within a
+    margin" -- if a head has actually collapsed, it wins outright even when
+    focus_labels (or its absence) would suggest something else."""
+    report = {"class_accuracy": {"up": 0.0, "down": 0.5, "neutral": 0.6},
+              "proposal": {"focus_labels": ["neutral"]}}
+    assert jm._weak_heads(report, 0.05) == ["up"]
+
+
+def test_weak_heads_unions_a_collapsed_head_with_an_independently_flagged_one():
+    """A collapsed head must not silently suppress a DIFFERENT head Sabina
+    independently flagged as weak -- each head's own schedule should be able
+    to progress regardless of the other head's collapse status."""
+    report = {"class_accuracy": {"up": 0.0, "down": 0.30, "neutral": 0.6},
+              "proposal": {"focus_labels": ["down"]}}
+    assert set(jm._weak_heads(report, 0.05)) == {"up", "down"}
+
+
+def test_collapsed_heads_lists_only_heads_below_floor():
+    report = {"class_accuracy": {"up": 0.0, "down": 0.40, "neutral": 0.95}}
+    assert jm._collapsed_heads(report, 0.05) == ["up"]
+
+
+def test_collapsed_heads_ignores_zero_support():
+    report = {
+        "class_accuracy": {"up": 0.0, "down": 0.40, "neutral": 0.95},
+        "class_support": {"up": 0, "down": 20, "neutral": 20},
+    }
+    assert jm._collapsed_heads(report, 0.05) == []
+
+
+# --- hard collapse gate: fail loudly instead of shipping (ADR 0004) --------
+
+def test_gate_fails_when_cap_hit_while_collapsed():
+    """Previously the iteration cap could force `proceed` even with a
+    collapsed class; now that must become `fail` instead."""
+    state = {
+        "evaluation_report": COLLAPSED_STATE["evaluation_report"],
+        "target_accuracy": 0.60, "max_iterations": 1,
+        "iteration": 0,  # +1 == max_iterations -> cap hit on this call
+    }
+    out = jm.decide(state)
+    assert out["final_action"] == "fail"
+    assert out["decision"] == "override"
+    assert out["overrides"] == {"final_action": "fail"}
+
+
+def test_gate_fails_when_converged_while_collapsed():
+    g, cfg = _graph(), {"configurable": {"thread_id": "fail-converged"}}
+    base = {"target_accuracy": 0.60, "max_iterations": 9, "patience": 1, "min_delta": 0.01,
+            "predictions_path": PRED}
+    report = {**COLLAPSED_STATE["evaluation_report"], "accuracy": 0.30}
+    # Two flat passes trip convergence (patience=1) while still collapsed.
+    g.invoke({**base, "evaluation_report": report}, cfg)
+    with pytest.raises(RuntimeError, match="collapsed"):
+        g.invoke({**base, "evaluation_report": report}, cfg)
+
+
+def test_fail_node_writes_decision_but_no_proceed_artifacts(outdir):
+    """fail() must record the audit trail but never produce the artifacts a
+    healthy proceed would -- a collapsed model must not look finished."""
+    state = {
+        "iteration": 3, "decision": "override", "final_action": "fail",
+        "overrides": {"final_action": "fail"}, "notes": "collapsed",
+        "evaluation_report": COLLAPSED_STATE["evaluation_report"],
+        "accuracy_history": [0.65],
+    }
+    with pytest.raises(RuntimeError):
+        jm.fail(state)
+    assert (outdir / "decision.json").exists()
+    assert not (outdir / "sample_for_explanation.csv").exists()
+    assert not (outdir / "retune_request.json").exists()
+    assert not (outdir / "final_results.csv").exists()
+
+
 def test_report_score_ranks_collapsed_below_healthy():
     """The best-iteration snapshot must rank on the same rule as the gate: a
     collapsed high-accuracy pass never beats a healthy lower-accuracy one."""
@@ -295,55 +348,14 @@ def test_report_score_ignores_zero_support_classes():
     assert jm.report_score(report) == 0.65
 
 
-def test_regression_reverts_to_best_params_and_perturbs():
-    """When the last iteration regresses hard below the best, the next retune
-    must go back toward the best iteration's params (one knob perturbed), not
-    keep escalating down the schedule."""
-    best_params = {"threshold": 0.20, "boost_factor": 1.75}
-    tried = [{"threshold": 0.45, "boost_factor": 1.25}, best_params]
-    history = [0.21, 0.30, 0.39, 0.23]   # best at index 2 (from tried[1]), then crash
-    params = jm._next_params(tried, history)
-    # Perturbation of the best params — one knob moved, the other kept.
-    assert (params.get("boost_factor") == best_params["boost_factor"]
-            and params["threshold"] != best_params["threshold"]) or (
-           params.get("threshold") == best_params["threshold"]
-            and params["boost_factor"] != best_params["boost_factor"])
-
-
-def test_no_regression_keeps_walking_schedule():
-    tried = [{"threshold": 0.45, "boost_factor": 1.25}]
-    history = [0.21, 0.30]               # improving — no revert
-    assert jm._next_params(tried, history) == jm._RETUNE_SCHEDULE[1]
-
-
-def test_collapse_forced_first_retune_takes_schedule_not_empty_params():
+def test_collapse_forced_retune_selects_the_collapsed_head():
     """When the collapse floor forces a retune on a pass Sabina recommended to
-    proceed, her proposal carries no suggested_params — the gate must fall back
-    to the schedule instead of 'accepting' {} and re-running Nadi's defaults."""
+    proceed, her proposal carries no focus_labels — the gate must still name
+    the collapsed head rather than sending Nadi an empty selection."""
     out = jm.decide(COLLAPSED_STATE)
     assert out["decision"] == "override"
-    assert out["tried_params"][-1] == jm._RETUNE_SCHEDULE[0]  # not {}
-
-
-def test_perturb_candidates_carry_full_params():
-    """A perturbation of iteration 1 (Nadi's defaults, no tried entry) must still
-    emit both knobs — a single-key dict makes _same() falsely match schedule
-    entries that share only that key."""
-    tried = [{"threshold": 0.45, "boost_factor": 1.25}]
-    history = [0.39, 0.20]               # best was iteration 1 (defaults), then crash
-    params = jm._next_params(tried, history)
-    assert {"threshold", "boost_factor"} <= set(params)
-
-
-def test_perturb_boost_is_clamped():
-    base = {"threshold": 0.20, "boost_factor": 1.95}
-    # Both threshold perturbations of the best entry already tried — the boost
-    # candidate is next and must not exceed _BOOST_MAX.
-    tried = [base, {"threshold": 0.15, "boost_factor": 1.95},
-             {"threshold": 0.25, "boost_factor": 1.95}]
-    history = [0.10, 0.39, 0.20, 0.20]   # best at index 1 (from tried[0])
-    params = jm._next_params(tried, history)
-    assert params["boost_factor"] == jm._BOOST_MAX
+    assert out["heads_to_retrain"] == ["up"]
+    assert out["collapsed_heads"] == ["up"]
 
 
 def test_accuracy_history_accumulates_one_per_iteration():

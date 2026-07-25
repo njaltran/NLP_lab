@@ -20,6 +20,28 @@ LABELS = ("up", "down", "neutral")
 # contract allows a small tolerance instead of requiring exact sums.
 PROBABILITY_TOLERANCE = 0.02
 
+
+def combine_binary_probs(p_up: float, p_down: float) -> dict[str, float]:
+    """Fold the up-head and down-head positive-class probabilities into one
+    three-way distribution.
+
+    `neutral` is the mass left over when neither head fires, so it is the product
+    of the two heads disagreeing with their own class. Renormalising makes the
+    three sum to 1, which keeps the maximum always >= 1/3 regardless of how
+    confident either head is.
+
+    No divide-by-zero guard: for p in [0, 1] the raw total is
+    p_up + p_down + (1 - p_up)(1 - p_down), which is >= 1 everywhere (it hits its
+    minimum of exactly 1 at the corners), so it can never be 0.
+    """
+    raw = {
+        "up": p_up,
+        "down": p_down,
+        "neutral": (1.0 - p_up) * (1.0 - p_down),
+    }
+    total = sum(raw.values())
+    return {label: value / total for label, value in raw.items()}
+
 # Handoff 2: Nadi writes these columns in predictions_test.csv; Sabina reads
 # them, and Nadi's LLM-code guardrail checks generated scripts against them.
 PREDICTION_COLUMNS = [

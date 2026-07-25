@@ -8,6 +8,8 @@ FNSPID_00006,2021-08-12,GOOG,Google ad sales steady amid market caution,137.50,1
 FNSPID_00007,2021-09-15,META,Meta invests heavily in VR as investors stay wary,376.00,369.50,-1.73,down,train
 FNSPID_00008,2021-10-20,NFLX,Netflix subscriber growth tops forecasts,615.00,640.20,4.10,up,val
 FNSPID_00009,2021-11-03,AMD,AMD lands major data center contract,120.50,126.30,4.81,up,val
+FNSPID_00013,2021-11-10,IBM,IBM warns of margin pressure amid rising costs,140.00,133.70,-4.50,down,val
+FNSPID_00014,2021-11-20,ORCL,Oracle database sales roughly in line with last quarter,88.00,88.30,0.34,neutral,val
 FNSPID_00010,2021-12-01,INTC,Intel delays next-gen chip launch,52.00,51.20,-1.54,down,test
 FNSPID_00011,2022-01-25,AAPL,Apple supply chain concerns ease,160.00,161.10,0.69,neutral,test
 FNSPID_00012,2022-02-14,MSFT,Microsoft announces Activision acquisition,295.00,300.50,1.86,up,test

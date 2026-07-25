@@ -100,15 +100,15 @@ Jack owns the threshold gate and the final call; Sabina only recommends. Jack ma
 |---|---|---|---|
 | iteration | integer | 2 | loop counter, starts at 1 |
 | decision | string | accept | `accept` (use proposal as-is) or `override` (Jack changed it) |
-| final_action | string | retune | `retune` or `proceed` — what actually happens |
+| final_action | string | retune | `retune`, `proceed`, or `fail` — what actually happens. `fail` means the iteration cap or convergence was hit while a class was still collapsed (ADR 0004): Jack writes this record then raises, and no further Handoff-4+ artifacts get written |
 | based_on_proposal | object | {...} | the `proposal` block from the report Jack decided on |
-| overrides | object | {"max_length": 256} | only if `decision = override` — fields Jack changed; empty object otherwise |
+| overrides | object | {"heads_to_retrain": ["up", "down"]} | only if `decision = override` — fields Jack changed; empty object otherwise |
 | notes | string | iteration cap not reached; applying proposal | Jack's rationale |
 | accuracy_history | list of float | [0.42, 0.51, 0.60] | one accuracy per iteration so far, cumulative through this iteration — the file is overwritten each iteration, so this is the trend's only record on disk |
 
 ### `retune_request.json` (Jack → Nadi, only when `final_action = retune`)
 
-The approved proposal Nadi acts on — Sabina's proposal as accepted or overridden by Jack.
+Which directional head(s) Nadi should fine-tune this pass. Nadi owns hyperparameter selection itself (ADR 0001) — this file names heads, not parameter values.
 
 | Field | Type | Example | Notes |
 |---|---|---|---|
@@ -116,10 +116,9 @@ The approved proposal Nadi acts on — Sabina's proposal as accepted or overridd
 | reason | string | accuracy 0.54 below target 0.60 | human-readable trigger |
 | current_accuracy | float | 0.54 | from the report that triggered the loop |
 | target_accuracy | float | 0.60 | threshold to clear |
-| focus_labels | list | ["down", "neutral"] | approved focus classes |
+| heads_to_retrain | list | ["down"] | directional head(s) — `up` and/or `down` — for Nadi to fine-tune this pass; union of Sabina's `focus_labels` (filtered to heads) and any collapsed head, never empty during a retune (both heads if neither signal names one) |
+| collapsed_heads | list | [] | subset of `heads_to_retrain` whose class has collapsed below the recall floor — Nadi starts that head's next attempt with a higher focus weight |
 | misclassified_ids | list | ["FNSPID_00423", ...] | rows to inspect or reweight |
-| suggested_params | object | {"threshold": 0.5, "max_length": 128, "boost_factor": 1.25} | approved hyperparameters Nadi regenerates the code with; `boost_factor` (default 1.25) scales the softmax probability of each `focus_labels` class before renormalizing |
-| code_notes | string | threshold hardcoded at 0.5 in classifier.py | Sabina's `code_notes` from the proposal, passed through unchanged (empty string if none) — input to Nadi's optional LLM code adaptation |
 
 ## Handoff 4 — Manager Agent (Jack) → Explanation Agent (Freddi)
 

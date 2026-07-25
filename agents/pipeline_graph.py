@@ -50,12 +50,16 @@ from typing_extensions import TypedDict
 
 try:
     from agents.aurora_processing import ProcessingAgent
+    from agents.console import rule, step
+    from agents.finbert_finetuner import HEADS
     from agents.nadi_classifier import ClassifierAgent
     from agents.sabina_evaluator import EvaluatorAgent
     from agents.freddi_explanation import ExplanationAgent
     from agents.jack_manager import ManagerAgent, report_score, write_sample, OUTPUT_DIR as OUT
 except ModuleNotFoundError:  # running as a bare script with agents/ on sys.path
     from aurora_processing import ProcessingAgent
+    from console import rule, step
+    from finbert_finetuner import HEADS
     from nadi_classifier import ClassifierAgent
     from sabina_evaluator import EvaluatorAgent
     from freddi_explanation import ExplanationAgent
@@ -70,8 +74,15 @@ SAMPLE = os.path.join(OUT, "sample_for_explanation.csv")
 RETUNE = os.path.join(OUT, "retune_request.json")
 EXPL = os.path.join(OUT, "explanations.csv")
 
+# Where Nadi publishes the two directional heads' checkpoints (ADR 0001/0002).
+# Fixed, unversioned paths -- each head's checkpoint is overwritten in place
+# on every retrain, so the best-iteration snapshot below must copy it out
+# before a later retune can overwrite a head that earned the best score.
+FINETUNED_DIR = os.path.join(OUT, "finbert_finetuned")
+
 # Snapshot dir for the best iteration's artifacts (internal to the loop, not a
-# contract handoff). Holds copies of CODE/PREDS/EVAL from the highest-scoring pass.
+# contract handoff). Holds copies of CODE/PREDS/EVAL from the highest-scoring
+# pass, plus whichever of the two head checkpoints existed at that pass.
 BEST_DIR = os.path.join(OUT, "best")
 
 # Nadi's internal per-iteration code snapshots (name mirrors nadi_classifier.py —
@@ -141,38 +152,53 @@ class Agents:
         )
 
 
-def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=None,
-                   dataset_end=None, sample_size=300, checkpointer=None):
+def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None,
+                   dataset_end=None, sample_size=300, epochs=None, checkpointer=None):
     """Compile the unified pipeline graph. `agents` supplies the five agents (real
     or fake); `threshold` is Aurora's labelling band; `data_dir` overrides where
-    Aurora reads fnspid_raw.csv (defaults to the repo `data/`); `model_dir`, when
-    set, is handed to Nadi so the classifier loads fine-tuned weights instead of
-    pretrained FinBERT (opt-in — omitted means today's behaviour); `dataset_end`
+    Aurora reads fnspid_raw.csv (defaults to the repo `data/`); `dataset_end`
     (YYYY-MM-DD) drops later rows before Aurora's train/test split; `sample_size`
-    is how many rows `select_best` redraws for the explanation sample. The node
-    functions close over these, so no non-serialisable objects live in the graph
-    state.
+    is how many rows `select_best` redraws for the explanation sample; `epochs`,
+    when set, overrides Nadi's pinned per-round epoch count (ADR 0001 Q11 — still
+    a fixed value applied uniformly, just an override point for manual runs; None
+    means use ClassifierAgent's own default). The node functions close over
+    these, so no non-serialisable objects live in the graph state.
+
+    There is no `model_dir` opt-in any more: Nadi manages its own two directional
+    head checkpoints under FINETUNED_DIR (ADR 0001) and always starts a fresh run
+    from pretrained FinBERT, fine-tuning only once the loop's first retune fires
+    (ADR 0001 Q12) — there is no external "seed with a prior checkpoint" path.
     """
     from langgraph.graph import StateGraph, START, END
 
     def process(state: PipelineState) -> dict:
         """Aurora: build the labelled dataset. Runs once, before the loop.
         Cleanup runs only after she succeeds (see docs/retune_loop.md)."""
+        step("run", "Aurora", "joining headlines to prices, labelling moves ...")
         extra = {"data_dir": data_dir} if data_dir else {}
         if dataset_end:
             extra["dataset_end"] = dataset_end
         processed = agents.aurora.run(threshold=threshold, **extra)["processed_data_path"]
         clean_outputs()
+        step("ok", "Aurora", f"labelled dataset ready · {processed}")
+        rule("iteration 1")
         return {"processed_data_path": processed}
 
     def classify(state: PipelineState) -> dict:
-        """Nadi: (re)generate and run the classifier. On cycle passes,
-        `retune_request_path` points at the Manager's latest retune request so the
-        params escalate; on the first pass it is None (fresh classifier)."""
-        extra = {"model_dir": model_dir} if model_dir else {}
-        agents.nadi.run(processed_data=state["processed_data_path"],
-                        classifier_code=CODE, predictions=PREDS,
-                        retune_request=state.get("retune_request_path"), **extra)
+        """Nadi: fine-tune whichever head(s) the last retune flagged (a no-op on
+        the first pass), then (re)generate and run the classifier. On cycle
+        passes, `retune_request_path` points at the Manager's latest retune
+        request; on the first pass it is None (cold start, pretrained FinBERT)."""
+        step("run", "Nadi", "fine-tuning flagged head(s) (if any) and classifying "
+             "the held-out rows ...")
+        extra = {"epochs": epochs} if epochs is not None else {}
+        res = agents.nadi.run(processed_data=state["processed_data_path"],
+                              classifier_code=CODE, predictions=PREDS,
+                              retune_request=state.get("retune_request_path"), **extra)
+        available = [head for head in HEADS if res.get(f"{head}_model_dir")]
+        note = (f"using fine-tuned {'/'.join(available)}-head checkpoint(s)"
+                if available else "using pretrained FinBERT")
+        step("ok", "Nadi", f"predictions ready · {note}")
         return {}
 
     def evaluate(state: PipelineState) -> dict:
@@ -184,44 +210,85 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
         later retunes regress."""
         agents.sabina.run(predictions=PREDS, classifier_code=CODE, eval_split="val")
         with open(EVAL, encoding="utf-8") as f:
-            score = report_score(json.load(f))
+            report = json.load(f)
+        score = report_score(report)
+        previous_best = state.get("best_score", float("-inf"))
         out = {"last_score": score}
-        if score > state.get("best_score", float("-inf")):
+        if score > previous_best:
             os.makedirs(BEST_DIR, exist_ok=True)
             # PREDS + CODE only: the finals' report comes from `evaluate_test`
             # (test split), so snapshotting the val report would be dead weight.
             for path in (PREDS, CODE):
                 shutil.copy2(path, os.path.join(BEST_DIR, os.path.basename(path)))
+            # Each head's checkpoint is overwritten IN PLACE on every retrain
+            # (ADR 0002's fixed-path layout) — unlike PREDS/CODE, a later
+            # retune can destroy the weights that earned THIS score, so they
+            # must be copied out now, not left to be read later from a path
+            # that may no longer hold them.
+            for head in HEADS:
+                head_dir = os.path.join(FINETUNED_DIR, head)
+                if os.path.isdir(head_dir):
+                    dest = os.path.join(BEST_DIR, head)
+                    shutil.rmtree(dest, ignore_errors=True)
+                    shutil.copytree(head_dir, dest)
             out["best_score"] = score
+
+        # A collapse is the only thing that makes `report_score` differ from the
+        # report's own accuracy: the score subtracts 1.0 for checkpoint ranking.
+        collapsed = score < report["accuracy"]
+        standing = ("★ new best" if score > previous_best
+                    else f"best stays {previous_best:.3f}")
+        if collapsed:
+            step("warn", "Sabina", f"val accuracy {report['accuracy']:.3f} but a CLASS "
+                 f"COLLAPSED — scored {score:.3f}, {standing}")
+        else:
+            step("ok", "Sabina", f"val accuracy {report['accuracy']:.3f} · {standing}")
         return out
 
     def gate(state: PipelineState) -> dict:
-        """Manager gate. Invoking it applies the accuracy gate (with convergence +
-        adaptive retune) and, as a side effect, writes EITHER retune_request.json
-        (retune) OR sample_for_explanation.csv (proceed). We surface its verdict so
+        """Manager gate. Invoking it applies the accuracy gate (with convergence,
+        collapse, and weak-head selection) and, as a side effect, writes EITHER
+        retune_request.json (retune) OR sample_for_explanation.csv (proceed) —
+        OR raises (ADR 0004: cap/convergence hit while still collapsed), which
+        propagates straight out of this graph's `.invoke()` and aborts the whole
+        run rather than finalizing a collapsed model. We surface the verdict so
         the router can branch, and expose RETUNE as the next classify input when
         retuning."""
         st = agents.manager.run(evaluation_report=EVAL)
         out = {"final_action": st["final_action"], "iteration": st["iteration"]}
         if st["final_action"] == "retune":
             out["retune_request_path"] = RETUNE  # fed back into `classify` on the cycle
+            heads = "/".join(st.get("heads_to_retrain", [])) or "?"
+            verb = "accepted" if st["decision"] == "accept" else "overrode"
+            step("gate", "Jack", f"RETUNE · fine-tuning {heads}-head · {verb} the proposal")
+            rule(f"iteration {st['iteration'] + 1}")
+        else:
+            step("gate", "Jack", "PROCEED to explanations")
+            rule("final scoring")
         return out
 
     def select_best(state: PipelineState) -> dict:
         """The gate proceeded with the LAST iteration's artifacts, which are not
         necessarily the best ones (accuracy can regress across retunes). If an
         earlier pass scored higher, restore its snapshot over the canonical paths
-        and redraw the explanation sample from the restored predictions, so
-        explain/finalize run on the best iteration. Gate semantics are untouched:
-        the Manager already made its verdict from the last iteration's report."""
+        (including whichever head checkpoints existed at that pass) and redraw
+        the explanation sample from the restored predictions, so explain/finalize
+        run on the best iteration. Gate semantics are untouched: the Manager
+        already made its verdict from the last iteration's report."""
         best, last = state.get("best_score", float("-inf")), state.get("last_score", float("-inf"))
         if best <= last:
             return {}
         for path in (PREDS, CODE):
             shutil.copy2(os.path.join(BEST_DIR, os.path.basename(path)), path)
+        for head in HEADS:
+            snapshot = os.path.join(BEST_DIR, head)
+            if os.path.isdir(snapshot):
+                dest = os.path.join(FINETUNED_DIR, head)
+                shutil.rmtree(dest, ignore_errors=True)
+                shutil.copytree(snapshot, dest)
         write_sample(PREDS, sample_size)
-        print(f"[pipeline] last iteration regressed (score {last:.2f}) — restored best "
-              f"iteration's artifacts (score {best:.2f}) for explanation + finals")
+        step("warn", "select", f"last iteration regressed ({last:.3f}) — restored the "
+             f"best iteration ({best:.3f}) for the finals")
         return {}
 
     def evaluate_test(state: PipelineState) -> dict:
@@ -229,11 +296,13 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
         selected on val, so the test rows are scored exactly once, here — an
         honest held-out number. Overwrites EVAL, which finalize reads for
         final_report.json (the finalize entry point does not re-run the gate)."""
+        step("run", "Sabina", "scoring the TEST split — the loop never saw these rows ...")
         agents.sabina.run(predictions=PREDS, classifier_code=CODE, eval_split="test")
         return {}
 
     def explain(state: PipelineState) -> dict:
         """Freddi: justify each sampled prediction into explanations.csv."""
+        step("run", "Freddi", "writing a justification per sampled prediction ...")
         agents.freddi.run(sample_for_explanation=SAMPLE, output=EXPL)
         return {}
 
@@ -268,7 +337,7 @@ def build_pipeline(agents: Agents, *, threshold=0.01, data_dir=None, model_dir=N
 
 def run(*, threshold=0.01, target_accuracy=0.60, max_iterations=5, patience=2,
         min_delta=0.01, sample_size=300, use_ollama=True, data_dir=None,
-        model_dir=None, dataset_end=None) -> dict:
+        dataset_end=None, epochs=None) -> dict:
     """Build the pipeline with real agents and run it once end to end, returning the
     final graph state. This is the entry point `main.py` calls."""
     from langgraph.checkpoint.memory import MemorySaver
@@ -277,7 +346,7 @@ def run(*, threshold=0.01, target_accuracy=0.60, max_iterations=5, patience=2,
                           patience=patience, min_delta=min_delta, sample_size=sample_size,
                           use_ollama=use_ollama)
     graph = build_pipeline(agents, threshold=threshold, data_dir=data_dir,
-                           model_dir=model_dir, dataset_end=dataset_end,
+                           dataset_end=dataset_end, epochs=epochs,
                            sample_size=sample_size, checkpointer=MemorySaver())
     return graph.invoke(
         {"retune_request_path": None},

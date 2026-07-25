@@ -5,6 +5,9 @@ Each field maps to a handoff defined in docs/data_contracts.md.
 All paths are absolute strings pointing to files the agents write to disk.
 """
 
+import operator
+from typing import Annotated
+
 from typing_extensions import TypedDict
 
 
@@ -24,11 +27,21 @@ class PipelineState(TypedDict, total=False):
     # ── Handoff 2: Classifier → Evaluator ───────────────────────────────────
     # docs/data_contracts.md §Handoff 2
     # Prof note: Sabina gets code + results, not only predictions CSV
-    model_dir: str | None       # optional fine-tuned weights folder; when set and it
-                                # exists, the classifier loads it instead of pretrained
-    llm_fn: object              # optional injected LLM callable used by the classifier's
-                                # agentic code-gen (tests pass a fake; None = real Ollama)
     predictions_path: str       # absolute path to predictions_test.csv
+
+    # ── Fine-tuning (ADR 0001): Nadi owns training, not a separate agent ────
+    finetuned_base_dir: str        # base dir for published checkpoints
+                                    # (<base>/up, <base>/down); default outputs/finbert_finetuned
+    epochs: int                    # epochs per fine-tune round, every head trained this pass
+                                    # (default nadi_classifier.EPOCHS_PER_ROUND; ADR 0001 Q11 —
+                                    # fixed per run, not a retune-tunable knob)
+    heads_to_retrain: list[str]    # heads Manager flagged this retune; [] before any retune
+    collapsed_heads: list[str]     # heads whose class has collapsed (steers the first
+                                    # attempt's focus weight — see next_head_training_params)
+    up_model_dir: str | None       # latest published up-head checkpoint, or None pre-training
+    down_model_dir: str | None     # latest published down-head checkpoint, or None pre-training
+    up_training_history: Annotated[list[dict], operator.add]    # this run's per-attempt history
+    down_training_history: Annotated[list[dict], operator.add]  # ditto, down head
     classifier_code_path: str   # absolute path to classifier.py (the generated script)
     classifier_history_path: str  # absolute path to this iteration's archived copy
                                    # (classifier_history/classifier_iterN.py) — classifier.py
