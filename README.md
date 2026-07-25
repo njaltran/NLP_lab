@@ -352,8 +352,8 @@ horizons, *none* beat the majority-class baseline. Full analysis:
    would close that gap and turn the loop into genuine iterative training. The cost is
    runtime: each cycle becomes a training run rather than fast inference, and the loop
    would need a guard against publishing a model that still has a collapsed class.
-8. **Abstain on low confidence — trade coverage for precision.** The model's confidence
-   turns out to be *informative*: filtering to only its more confident predictions
+8. **Reject low confidence — we trade coverage for precision.** As we mentioned in the presentation during the dashboard, 
+  the model's confidence turns out to be *informative*: filtering to only its more confident predictions
    raises accuracy sharply. Measured on the committed test set:
 
    | Min. confidence | Predictions kept | Coverage | Accuracy |
@@ -364,9 +364,9 @@ horizons, *none* beat the majority-class baseline. Full analysis:
    | ≥ 0.60 | 24 | 1.1% | **0.833** |
 
    At a 0.45 cutoff the model finally beats the 0.516 baseline, and above that it looks
-   genuinely strong. The catch is coverage: it answers on under 8% of headlines, and by
-   0.50 the samples are too small (42 rows) to trust the number — the model also stops
-   predicting `up` entirely. Still, this reframes the task usefully: instead of forcing
+   genuinely strong. The catch is of course coverage: it answers on under 8% of headlines, and by
+   0.50 the samples are too small (42 rows) to trust the number. The model also stops
+   predicting `up` entirely. Still, this reframes the task usefully in the context of suggesting financial decisions: instead of forcing
    a call on every headline, a practical system could **abstain by default and only act
    when confident**. Validating that properly needs a confidence cutoff tuned on the
    `val` split and reported with confidence intervals, not read off the test set.
