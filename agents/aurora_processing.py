@@ -143,8 +143,11 @@ def processing_node(state: PipelineState) -> dict:
 
     # 3. Assign prices and labels
     print("[processing] Assigning prices and labels ...")
-    results = [_get_t_and_t1(row["ticker"], row["date"], price_cache)
-               for _, row in df.iterrows()]
+    # Zip the two columns instead of df.iterrows(): iterrows builds a throwaway
+    # Series per row (and upcasts mixed dtypes to object), which costs ~100x more
+    # than reading the raw values straight off the columns.
+    results = [_get_t_and_t1(ticker, date, price_cache)
+               for ticker, date in zip(df["ticker"], df["date"])]
 
     df["price_t"]    = [round(r[0], 2) if r[0] is not None else None for r in results]
     df["price_t1"]   = [round(r[1], 2) if r[1] is not None else None for r in results]
