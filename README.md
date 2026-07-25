@@ -1,11 +1,11 @@
 # NLP Lab - Predicting Stock Movement from Financial News Headlines
 
-A five-agent NLP pipeline that predicts the **next-day stock move** (`up` / `down` /
-`neutral`) from a financial-news headline using **FinBERT**, evaluates itself in a
-feedback loop, and explains every prediction in plain English.
+A five-agent **LangGraph** pipeline that predicts the **next-day stock move**
+(`up` / `down` / `neutral`) from a financial-news headline using **FinBERT**,
+evaluates itself in a feedback loop, and explains every prediction in plain English.
 
-> **Are you Prof. Hristova? Start with [Quick start](#quick-start), then [Repository map](#repository-map) :) .**
-> To see results *without running anything*, open [`outputs/final_report.json`](./outputs/final_report.json).
+> **Just want the results?** Open [`outputs/final_report.json`](./outputs/final_report.json) — committed from a real run, no setup needed.
+> **Want to run it?** Everything you need is in the next section. 🙂
 
 ---
 
