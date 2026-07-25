@@ -213,6 +213,29 @@ whose retune loop is a graph *cycle* (`gate → classify → evaluate → gate`)
 
 ![LangGraph pipeline graph](./docs/pipeline_graph.png)
 
+### How the loop protects itself
+
+A naive retune loop fails in predictable ways: it repeats the same attempt, it accepts
+a degenerate model, or it finishes on a worse iteration than one it already had. The
+Manager has a specific safeguard for each — this is the most engineered part of the
+system, so it is worth reading [`agents/jack_manager.py`](./agents/jack_manager.py) and
+[`docs/retune_loop.md`](./docs/retune_loop.md) alongside this list.
+
+| Failure mode | Safeguard |
+|---|---|
+| The loop re-proposes the same settings and gets the same result | **Escalating retune schedule** — each cycle picks the first parameter set *not already tried*, comparing only the keys both sets share, so an "identical" classifier can't slip through |
+| A degenerate model looks good on aggregate accuracy | **Class-collapse floor** — if any class's recall falls below `min_class_accuracy` (0.05), the gate refuses to treat it as cleared, so an all-neutral run cannot fake a pass |
+| A class is absent from a scoring window, and looks like a collapse | Sabina reports **per-class support**, so zero rows is distinguishable from zero skill |
+| An escalation overshoots and accuracy drops | **Revert-and-perturb** — on a regression beyond 0.05 the Manager returns to the *best* iteration's settings and moves one knob one step, instead of escalating further |
+| The loop finalises on a pass worse than an earlier one | **`select_best`** — each new-best iteration is snapshotted, and the best is restored before explanation and the final report |
+| The loop never terminates, or burns its whole budget on a plateau | **Convergence early-stop** (`patience` / `min_delta`) plus a hard iteration cap |
+| A previous run's files contaminate a new one | **`clean_outputs()`** wipes loop artifacts before each run, while keeping expensive ones (fine-tuned weights, fine-tune reports) |
+| The loop tunes itself against the final measurement | Retunes are scored on **`val`**; `test` is scored exactly once, at the end |
+
+The gate itself is deterministic throughout. An LLM writes only the human-readable
+rationale in `decision.json`, and it is given the accuracy trend and the collapsed
+class so its explanation is grounded in the same numbers the rules used.
+
 ---
 
 ## The five agents
