@@ -119,7 +119,8 @@ The approved proposal Nadi acts on — Sabina's proposal as accepted or overridd
 | focus_labels | list | ["down", "neutral"] | approved focus classes |
 | misclassified_ids | list | ["FNSPID_00423", ...] | rows to inspect or reweight |
 | suggested_params | object | {"threshold": 0.5, "max_length": 128, "boost_factor": 1.25} | approved hyperparameters Nadi regenerates the code with; `boost_factor` (default 1.25) scales the softmax probability of each `focus_labels` class before renormalizing |
-| code_notes | string | threshold hardcoded at 0.5 in classifier.py | Sabina's `code_notes` from the proposal, passed through unchanged (empty string if none) — input to Nadi's optional LLM code adaptation |
+| code_notes | string | threshold hardcoded at 0.5 in classifier.py; trend 0.54; collapsed class: none | Sabina's `code_notes` from the proposal (verbatim, or omitted if she had none), with the Manager's own `trend <accuracy_history>; collapsed class: <label (recall, floor)\|none>` appended — cross-iteration context Sabina can't see since she scores one report at a time. Input to Nadi's optional LLM code adaptation |
+| collapsed_label | string | up | the class (if any) whose recall fell below the Manager's collapse floor this iteration; empty string if none. Structured twin of the "collapsed class" mention in `code_notes` — Nadi's optional LLM code adaptation branches on this directly instead of parsing prose |
 
 ## Handoff 4 — Manager Agent (Jack) → Explanation Agent (Freddi)
 
