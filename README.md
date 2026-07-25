@@ -209,8 +209,7 @@ the classifier's settings rather than repeating, so the loop explores instead of
 spinning.
 
 The whole thing is **one compiled LangGraph** ([`agents/pipeline_graph.py`](./agents/pipeline_graph.py))
-whose retune loop is a real graph *cycle* (`gate → classify → evaluate → gate`), not a
-Python `while` loop. `main.py` only loads secrets, parses flags, and invokes the graph.
+whose retune loop is a graph *cycle* (`gate → classify → evaluate → gate`). `main.py` only loads secrets, parses flags, and invokes the graph.
 
 ![LangGraph pipeline graph](./docs/pipeline_graph.png)
 
@@ -229,7 +228,7 @@ change, labels each row, and assigns a leak-free split.
 - **Writes:** `data/processed_data.csv`
 - **Code:** [`agents/aurora_processing.py`](./agents/aurora_processing.py) · **How the label band and outlier fences were chosen:** [EDA notebook](./docs/processing_experiments.ipynb)
 - **Key choices:** ±1% label band; outliers trimmed at the 1st–99th percentile;
-  **split by date, never randomly** (train on the past, test on the future);
+  **split by date** (train on the past, test on the future);
   `val` = last 10% of training dates so the loop can tune without touching `test`.
 
 ### 2. Classifier — Nadi
@@ -244,7 +243,7 @@ and hands both the code *and* the predictions downstream.
 
 ### 3. Evaluator — Sabina
 Scores the classifier's output and proposes the next action. It does **not** train
-anything or produce predictions; it is the quality-control step.
+anything or produce predictions.
 - **Reads:** `predictions_test.csv`, `classifier.py` (as text)
 - **Writes:** `evaluation_report.json`
 - **Code:** [`agents/sabina_evaluator.py`](./agents/sabina_evaluator.py)
@@ -265,7 +264,7 @@ the final deliverables.
 - **Writes:** `decision.json`, `retune_request.json`, `sample_for_explanation.csv`,
   `final_results.csv`, `final_report.json`
 - **Code:** [`agents/jack_manager.py`](./agents/jack_manager.py) · **Details:** [`docs/retune_loop.md`](./docs/retune_loop.md)
-- **Key choices:** the gate is **pure rules** (an LLM only writes the rationale prose);
+- **Key choices:** the gate is **pure rules** (an LLM only writes the rationale);
   a collapsed class cannot clear the gate, so an "always neutral" run can't fake a pass;
   if a retune makes things worse it reverts to the best settings and nudges gently; the
   pipeline finalises on the **best** iteration, not the last; it always terminates
@@ -280,16 +279,6 @@ Generates a one-sentence plain-English justification for each sampled prediction
   so it cannot rationalise backwards; low temperature (0.3) for grounded, consistent
   wording; falls back to a deterministic placeholder if the LLM is unavailable, so the
   pipeline never crashes.
-
-### Cross-cutting design
-- **"LLM narrates, rules decide."** Every control decision — the gate, retune-vs-proceed,
-  which settings to try, the metrics — is deterministic code. LLMs only write
-  human-readable text. This keeps the system genuinely agentic without letting a
-  stochastic model corrupt reproducible, auditable control flow.
-- **Never crash.** Every LLM-dependent step has a safe fallback.
-- **Contract-driven.** [`agents/contracts.py`](./agents/contracts.py) holds one shared
-  definition of every handoff format, so agents can't drift apart, and
-  [`mock_data/`](./mock_data) provides a valid sample of each file for testing.
 
 ---
 
@@ -309,7 +298,7 @@ COVID period excluded (`--dataset-end 2019-12-31`):
 | Balanced accuracy | 0.39 *(chance = 0.333)* |
 | Explanations generated | 300 |
 
-**How to read this honestly.** On plain accuracy the model (0.50) does *not* beat
+**How to read this.** On plain accuracy the model (0.50) does *not* beat
 always-guessing-neutral (0.516) — because neutral is 52% of the test set, so that one
 class carries the score. On **balanced accuracy**, which weights all three classes
 equally and therefore cannot be gamed by the majority class, the model scores **0.39
@@ -347,7 +336,7 @@ horizons, *none* beat the majority-class baseline. Full analysis:
    accuracy (baseline `0.333`) as the headline metric, since plain accuracy is inflated
    by class imbalance.
 2. **Aggregate headlines per ticker-day.** One headline carries very little signal;
-   combining all news for a ticker on a given day is the most promising next step.
+   combining all news for a ticker on a given day could be the most promising next step.
 3. **Deduplicate syndicated headlines.** The same story is republished across outlets;
    near-duplicates likely accelerate overfitting.
 4. **Add a learning-rate schedule.** Fine-tuning currently uses a flat rate with no
@@ -356,6 +345,32 @@ horizons, *none* beat the majority-class baseline. Full analysis:
    headlines alone do not.
 6. **Two-head architecture.** Separate binary `up`-vs-neutral and `down`-vs-neutral
    models may sharpen per-class discrimination — prototyped, not yet validated.
+7. **Fine-tune inside the retune loop.** Today training happens once, offline, and each
+   retune only adjusts inference settings (`threshold`, `boost_factor`) on fixed
+   weights — so the loop can reshuffle predictions but never actually *learns* from the
+   evaluator's feedback. Making every retune a fine-tuning pass on the weakest class
+   would close that gap and turn the loop into genuine iterative training. The cost is
+   runtime: each cycle becomes a training run rather than fast inference, and the loop
+   would need a guard against publishing a model that still has a collapsed class.
+8. **Abstain on low confidence — trade coverage for precision.** The model's confidence
+   turns out to be *informative*: filtering to only its more confident predictions
+   raises accuracy sharply. Measured on the committed test set:
+
+   | Min. confidence | Predictions kept | Coverage | Accuracy |
+   |---|---|---|---|
+   | none (all rows) | 2,196 | 100% | 0.497 |
+   | ≥ 0.45 | 171 | 7.8% | **0.544** |
+   | ≥ 0.50 | 42 | 1.9% | **0.738** |
+   | ≥ 0.60 | 24 | 1.1% | **0.833** |
+
+   At a 0.45 cutoff the model finally beats the 0.516 baseline, and above that it looks
+   genuinely strong. The catch is coverage: it answers on under 8% of headlines, and by
+   0.50 the samples are too small (42 rows) to trust the number — the model also stops
+   predicting `up` entirely. Still, this reframes the task usefully: instead of forcing
+   a call on every headline, a practical system could **abstain by default and only act
+   when confident**. Validating that properly needs a confidence cutoff tuned on the
+   `val` split and reported with confidence intervals, not read off the test set.
+   Explore it interactively in [`dashboard.py`](./dashboard.py).
 
 ---
 
