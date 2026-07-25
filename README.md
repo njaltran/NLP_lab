@@ -1,10 +1,10 @@
-# NLP Lab — Predicting Stock Movement from Financial News Headlines
+# NLP Lab - Predicting Stock Movement from Financial News Headlines
 
 A five-agent NLP pipeline that predicts the **next-day stock move** (`up` / `down` /
 `neutral`) from a financial-news headline using **FinBERT**, evaluates itself in a
 feedback loop, and explains every prediction in plain English.
 
-> **New here? Start with [Quick start](#quick-start), then [Repository map](#repository-map).**
+> **Are you Prof. Hristova? Start with [Quick start](#quick-start), then [Repository map](#repository-map) :) .**
 > To see results *without running anything*, open [`outputs/final_report.json`](./outputs/final_report.json).
 
 ---
@@ -21,15 +21,11 @@ movement (up / down / neutral)?*
 **Contribution.** Two things:
 
 1. **A working multi-agent system.** Five specialised agents, connected as one
-   **LangGraph**, exchanging strictly-defined contract files. The Manager evaluates
-   results and sends the classifier back to retry with new settings — a real feedback
-   *cycle*, not a linear script.
+   **LangGraph**, exchanging defined contract files. The Manager evaluates
+   results and sends the classifier back to retry with new settings (feedback cycle).
 2. **An honest answer to the question.** Our best full-pipeline run reaches **0.50**
    accuracy against a **0.516** majority-class baseline. The model is nearly blind to
-   `down` moves (5% recall). We show — and independently corroborate against published
-   work — that the ceiling here is the **data**, not the model or the training recipe.
-   The deliverable is a well-engineered, self-auditing system plus a defensible
-   negative result.
+   `down` moves (5% recall).
 
 ---
 
@@ -39,9 +35,17 @@ Python 3.13. **Recommended:** [uv](https://docs.astral.sh/uv/), which installs t
 exact locked dependency versions from `uv.lock`.
 
 ```bash
-uv sync                      # install dependencies
-uv run main.py --no-ollama   # run the full pipeline
+uv sync                                                  # install dependencies
+uv run main.py --no-ollama --dataset-end 2019-12-31      # run the full pipeline
 ```
+
+**Why `--dataset-end 2019-12-31`?** It drops rows after that date, keeping the COVID
+crash out of the data. Our dataset runs to mid-2020, and because the split is by date
+the 2020 crash would otherwise land entirely in the *test* set — so we would be
+measuring accuracy on a once-in-a-generation market shock rather than a normal regime.
+**All reported results below use this flag**, so include it to reproduce them
+(11,067 rows → 7,991 train / 880 val / 2,196 test). Omit it to run on the full
+dataset instead (2,930 test rows).
 
 <details>
 <summary>Alternative: plain pip</summary>
@@ -52,7 +56,7 @@ dependencies (it is not used by `uv sync`):
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python main.py --no-ollama
+python main.py --no-ollama --dataset-end 2019-12-31
 ```
 
 </details>
@@ -63,22 +67,22 @@ extra setup. To generate real LLM explanations instead, install
 
 ### What ships, and what is fetched
 
-**Data — included.** Both inputs ship with the repo: the raw headlines
+**Data (included).** Both inputs ship with the repo: the raw headlines
 (`data/fnspid_raw.csv`) and the cached price history (`data/price_cache.pkl`). No
 yfinance download is needed, and the cache keeps results reproducible since yfinance
-can return revised history over time. Delete the cache to re-fetch prices live.
+can return revised history over time. Delete the cache to re-fetch prices live (we did this for you to save time to run)
 
-**Results — included.** [`outputs/`](./outputs) holds the artifacts of a completed
+**Results (included).** [`outputs/`](./outputs) holds the artifacts of a completed
 end-to-end run, so the results can be inspected and graded without running anything.
 
-**Model weights — not included, fetched or regenerated:**
+**Model weights (not included, fetched or regenerated):**
 
 | | Size | How to get it |
 |---|---|---|
 | Pretrained FinBERT (`ProsusAI/finbert`) | ~440 MB | Downloads automatically from Hugging Face on first use, then cached locally. **The first run needs internet for this.** |
-| Our fine-tuned weights | ~420 MB | Not shipped, to keep the submission small. Regenerate by running the Processing agent first, then the fine-tuner (both seeded and reproducible) — see below. Results are logged in [`docs/finetune_runs.md`](./docs/finetune_runs.md). |
+| Our fine-tuned weights | ~420 MB | Not shipped, to keep the submission small. Regenerate by running the Processing agent first, then the fine-tuner (both seeded and reproducible) - see below. Results are logged in [`docs/finetune_runs.md`](./docs/finetune_runs.md). |
 
-Neither is required to inspect the committed results — only to re-run the pipeline
+Neither is required to inspect the committed results but only to re-run the pipeline
 yourself. To reproduce the fine-tuned weights:
 
 ```bash
@@ -300,7 +304,8 @@ Generates a one-sentence plain-English justification for each sampled prediction
 ## Results
 
 From the committed run in [`outputs/final_report.json`](./outputs/final_report.json)
-(2,196 held-out test headlines, scored once, after 5 loop iterations):
+— 2,196 held-out test headlines, scored once, after 5 loop iterations, with the
+COVID period excluded (`--dataset-end 2019-12-31`):
 
 | Metric | Value |
 |---|---|
